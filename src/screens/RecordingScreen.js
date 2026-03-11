@@ -128,22 +128,31 @@ export default function RecordingScreen({ token, onLogout }) {
     const stopAutoChunkRecording = async (isManualStop = false) => {
         if (!autoRecordingRef.current) return;
         try {
+            console.log('Stopping auto chunk recording...');
             setIsAutoRecording(false);
             if (autoRecordingTimeoutRef.current) clearTimeout(autoRecordingTimeoutRef.current);
             if (autoStopTimeoutRef.current) clearInterval(autoStopTimeoutRef.current);
 
-            await autoRecordingRef.current.stopAndUnloadAsync();
-            const uri = autoRecordingRef.current.getURI();
+            const recording = autoRecordingRef.current;
             autoRecordingRef.current = null;
+
+            await recording.stopAndUnloadAsync();
+            const uri = recording.getURI();
 
             if (uri) uploadAudio(uri);
 
-            // If auto agent is still enabled and we didn't manually stop it, resume listening
+            // Resilient Restart: Always try to restart if agent is still running
             if (isAutoAgentRunning && !isManualStop) {
-                startAutoAgent();
+                console.log('Auto-Agent active: Restarting listener...');
+                // Shorter delay to ensure hardware is released
+                setTimeout(() => {
+                    startAutoAgent();
+                }, 800);
             }
         } catch (err) {
-            console.error(err);
+            console.error('Failed to stop chunk or restart:', err);
+            // Even if stop fails, try to reset and restart if active
+            if (isAutoAgentRunning && !isManualStop) startAutoAgent();
         }
     };
 
@@ -222,9 +231,11 @@ export default function RecordingScreen({ token, onLogout }) {
         try {
             console.log('Stopping continuous manual recording...');
             setIsManualRecording(false);
-            await manualRecordingRef.current.stopAndUnloadAsync();
-            const uri = manualRecordingRef.current.getURI();
+            const recording = manualRecordingRef.current;
             manualRecordingRef.current = null;
+
+            await recording.stopAndUnloadAsync();
+            const uri = recording.getURI();
 
             if (uri) {
                 // Move to persistent app directory so it doesn't get cleared from cache
@@ -234,11 +245,14 @@ export default function RecordingScreen({ token, onLogout }) {
 
                 Alert.alert(
                     'Grabación Local Guardada',
-                    `La grabación nocturna continua ha sido guardada directamente en la memoria de tu teléfono de forma OFFLINE para evitar colapsar la nube.\n\nRuta: ${newPath}`
+                    `La grabación nocturna continua ha sido guardada directamente en la memoria de tu teléfono de forma OFFLINE.\n\nRuta: ${newPath}`
                 );
             }
         } catch (err) {
             console.error('Failed to stop manual recording', err);
+            Alert.alert('Error', 'No se pudo detener o guardar la grabación local correctamente.');
+            setIsManualRecording(false);
+            manualRecordingRef.current = null;
         }
     };
 
