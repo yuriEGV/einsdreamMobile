@@ -670,7 +670,12 @@ export default function RecordingScreen({ token, onLogout }) {
 
     return (
         <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
-            <Text style={s.title}>EinsDream Mobile</Text>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                <Text style={s.title}>EinsDream Mobile</Text>
+                <View style={{ backgroundColor: '#4f46e5', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginTop: 6 }}>
+                    <Text style={{ color: '#ffffff', fontWeight: '800', fontSize: 13, letterSpacing: 0.5 }}>v2.1.1 (Estable)</Text>
+                </View>
+            </View>
 
             {/* ─── Info card ──────────────────────────────────────────────── */}
             <View style={s.infoCard}>
@@ -839,7 +844,7 @@ export default function RecordingScreen({ token, onLogout }) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
     container: { flexGrow: 1, padding: 16, backgroundColor: '#f8fafc', alignItems: 'stretch' },
-    title: { fontSize: 26, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 16, letterSpacing: 0.5 },
+    title: { fontSize: 26, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 2, letterSpacing: 0.5 },
 
     infoCard: { backgroundColor: '#e0f2fe', borderRadius: 12, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#7dd3fc' },
     infoTitle: { fontWeight: '700', fontSize: 15, color: '#0369a1', marginBottom: 6 },
