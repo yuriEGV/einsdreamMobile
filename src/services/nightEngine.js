@@ -1,10 +1,4 @@
-/**
- * nightEngine.js
- * The core correlation engine for EinsDream.
- * Correlates nocturnal acoustic events with Google Health Connect physiological data
- * (Heart Rate, Respiratory Rate, Oxygen Saturation, and Sleep Stages).
- * Adheres strictly to non-diagnostic, descriptive clinical classifications.
- */
+import { evaluateEinsdreamScore } from './predictiveEngine';
 
 /**
  * Correlates a list of audio events with continuous health metric series.
@@ -12,9 +6,10 @@
  * @param {Array} params.audioEvents - [{ timestamp, duration, eventType, intensityDb, audioUrl, id }]
  * @param {Object} params.healthData - { heartRateSeries, respiratoryRateSeries, oxygenSaturationSeries, sleepSummary }
  * @param {Object} params.sessionWindow - { startTime, endTime, sessionDate }
+ * @param {Object} params.baselineProfile - { targetBedtime, targetWakeTime, targetSleepMinutes, chronotype }
  * @returns {Object} Full correlated Night Session payload for MongoDB sync
  */
-export function processNightEngineCorrelation({ audioEvents = [], healthData = {}, sessionWindow = {} }) {
+export function processNightEngineCorrelation({ audioEvents = [], healthData = {}, sessionWindow = {}, baselineProfile = {} }) {
     const { startTime, endTime, sessionDate } = sessionWindow;
     const {
         heartRateSeries = [],
@@ -139,6 +134,16 @@ export function processNightEngineCorrelation({ audioEvents = [], healthData = {
     const spo2Values = oxygenSaturationSeries.map(s => s.percentage).filter(Boolean);
     const avgSpO2 = spo2Values.length > 0 ? Number((spo2Values.reduce((a, b) => a + b, 0) / spo2Values.length).toFixed(1)) : null;
 
+    // 7. Run Einsdream Evaluation Engine (3 Health Pillars, 6+ Dimensions, Cardio HRV)
+    const evaluation = evaluateEinsdreamScore({
+        startTime: startTime || Date.now() - 8 * 3600 * 1000,
+        endTime: endTime || Date.now(),
+        sleepSummary,
+        heartRateSeries,
+        correlatedEvents,
+        baselineProfile
+    });
+
     return {
         sessionDate: sessionDate || new Date().toISOString().slice(0, 10),
         startTime: new Date(startTime || Date.now() - 8 * 3600 * 1000),
@@ -163,6 +168,11 @@ export function processNightEngineCorrelation({ audioEvents = [], healthData = {
                 : (heartRateSeries.length > 0
                     ? `Se registraron ${correlatedEvents.length} eventos acústicos nocturnos correlacionados con Health Connect.`
                     : `Modo Autónomo Acústico: Se registraron ${correlatedEvents.length} eventos de audio nocturnos por micrófono.`)
-        }
+        },
+        einsdreamScore: evaluation.einsdreamScore,
+        dimensions: evaluation.dimensions,
+        cardiovascular: evaluation.cardiovascular,
+        snoreMetrics: evaluation.snoreMetrics,
+        sleepBreakdown: evaluation.sleepBreakdown
     };
 }
