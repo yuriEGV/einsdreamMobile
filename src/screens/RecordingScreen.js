@@ -1,5 +1,5 @@
 /**
- * RecordingScreen.js - EinsDream 2026 v2.3.1
+ * RecordingScreen.js - EinsDream 2026 v2.4.0
  *
  * Sistema Inteligente de Monitoreo Nocturno, Motor Einsdream Score y Análisis Predictivo
  *
@@ -86,11 +86,30 @@ const RECORDING_OPTIONS = {
     web: { mimeType: 'audio/mp4', bitsPerSecond: 96000 },
 };
 
-const NOISE_THRESHOLD_DB  = -36;
-// 20s window: mic has been running ~5s already when trigger fires (pre-buffer),
-// then we continue 15s more post-trigger before saving the clip.
-const POST_CAPTURE_SECONDS = 15;
-const TOTAL_CAPTURE_SECONDS = 20; // pre(~5s already elapsed) + post(15s)
+const NOISE_THRESHOLD_DB   = -36;
+// Night recording: low-bitrate continuous mode (32kbps mono ≈ 86 MB / 6 h)
+const NIGHT_RECORDING_OPTIONS = {
+    isMeteringEnabled: true,
+    android: {
+        extension: '.m4a',
+        outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+        audioEncoder: Audio.AndroidAudioEncoder.AAC,
+        sampleRate: 22050,
+        numberOfChannels: 1,
+        bitRate: 32000,
+    },
+    ios: {
+        extension: '.m4a',
+        outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+        audioQuality: Audio.IOSAudioQuality.MEDIUM,
+        sampleRate: 22050,
+        numberOfChannels: 1,
+        bitRate: 32000,
+    },
+    web: { mimeType: 'audio/mp4', bitsPerSecond: 32000 },
+};
+// Event debounce: minimum seconds between two logged events of the same type
+const EVENT_DEBOUNCE_MS    = 30000;
 const MAX_STORAGE_MB       = 100;
 const INDEX_FILENAME        = 'einsdream_events_index.json';
 const PROFILE_FILENAME      = 'einsdream_sleep_profile.json';
@@ -240,10 +259,12 @@ export default function RecordingScreen({ token, onLogout }) {
 
     // Refs
     const monitorActiveRef = useRef(false);
-    const capturingRef = useRef(false);
+    const capturingRef = useRef(false); // debounce gate for event logging
     const listenerRecRef = useRef(null);
     const monitorTimerRef = useRef(null);
     const monitorStartTimestampRef = useRef(null);
+    const lastEventMs = useRef({}); // { eventType: lastLoggedTimestamp } for per-type debounce
+    const nightEventsRef = useRef([]); // acoustic event markers accumulated during one night
     const testTimerRef = useRef(null);
     const testRecRef = useRef(null);
     const soundRef = useRef(null);
@@ -374,7 +395,7 @@ export default function RecordingScreen({ token, onLogout }) {
             let sessions = [];
             if (token) {
                 try {
-                    const res = await axios.get(`${API_URL}/night-sessions`, {
+                    const res = await axios.get(`${API_URL}/night-sessions/history`, {
                         headers: { Authorization: `Bearer ${token}` },
                         timeout: 5000
                     });
@@ -455,19 +476,27 @@ export default function RecordingScreen({ token, onLogout }) {
                     id: file,
                     filename: file,
                     uri,
-                    label: (meta.label && meta.label !== 'unknown') ? meta.label : (file.startsWith('prueba_') ? '🎙️ Prueba de Micrófono' : '🎧 Audio Nocturno'),
+                    label: (meta.label && meta.label !== 'unknown') ? meta.label : (file.startsWith('prueba_') ? '🎙️ Prueba de Micrófono' : file.startsWith('noche_') ? '🌙 Audio Nocturno' : '🎧 Audio'),
                     eventType: (meta.eventType && meta.eventType !== 'unknown') ? meta.eventType : 'audio',
                     confidence: meta.confidence || 85,
                     intensityDb: meta.intensityDb || -30,
                     sizeBytes: info.size || 0,
                     sizeKb: Math.round((info.size || 0) / 1024),
-                    modTime: info.modificationTime || Date.now(),
+                    modTime: meta.timestamp || info.modificationTime || Date.now(),
                     dateStr: new Date(meta.timestamp || info.modificationTime || Date.now()).toLocaleTimeString('es-CL', {
                         hour: '2-digit',
                         minute: '2-digit',
                         second: '2-digit',
                     }),
+                    // Night session extras
+                    isNightSession: !!meta.isNightSession,
+                    sessionDate: meta.sessionDate || new Date(meta.timestamp || info.modificationTime || Date.now()).toISOString().slice(0, 10),
+                    soundEvents: meta.soundEvents || [],
+                    durationMs: meta.durationMs || 0,
+                    eventsCount: meta.eventsCount || 0,
+                    startTimestamp: meta.startTimestamp || 0,
                 });
+
             }
 
             // Sincronizar y recuperar grabaciones históricas desde la nube
@@ -712,11 +741,6 @@ export default function RecordingScreen({ token, onLogout }) {
         try {
             if (!rec.uri || rec.isCloud) return true;
 
-            const b64 = await FileSystem.readAsStringAsync(rec.uri, {
-                encoding: FileSystem.EncodingType.Base64,
-            });
-            const audioBase64 = `data:audio/m4a;base64,${b64}`;
-
             const initRes = await axios.post(
                 `${API_URL}/upload/init`,
                 { filename: rec.filename, contentType: 'audio/m4a' },
@@ -729,6 +753,43 @@ export default function RecordingScreen({ token, onLogout }) {
                 ? new Date(rec.timestamp).toISOString()
                 : (rec.modTime ? new Date(rec.modTime).toISOString() : new Date().toISOString());
 
+            const sessionDate = rec.sessionDate || detectedAtIso.slice(0, 10);
+
+            // ── Large night recording: metadata-only (no base64) ──────────────────
+            // Vercel body limit is 4.5 MB; night audio files are 50-150 MB.
+            // We sync only event markers so the dashboard can display the timeline.
+            if (rec.isLargeFile || rec.isNightSession) {
+                const metaPayload = {
+                    storageKey: fileKey,
+                    s3Key: fileKey,
+                    duration: rec.durationSecs || Math.round((rec.durationMs || 0) / 1000),
+                    deviceModel: Platform.OS === 'android' ? 'Android Native' : 'iOS Native',
+                    eventType: rec.eventType || 'night_session',
+                    confidence: rec.confidence || 100,
+                    intensityDb: rec.intensityDb || 55,
+                    detectedAt: detectedAtIso,
+                    sessionGroup: `night_${sessionDate}`,
+                    isLargeFile: true,
+                    isNightSession: true,
+                    sessionDate,
+                    durationMs: rec.durationMs || 0,
+                    eventsCount: rec.eventsCount || 0,
+                    soundEvents: rec.soundEvents || [],
+                };
+                await axios.post(
+                    `${API_URL}/upload/metadata`,
+                    metaPayload,
+                    { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
+                );
+                return true;
+            }
+
+            // ── Small clip (< 3 MB): include base64 audio ────────────────────────
+            const b64 = await FileSystem.readAsStringAsync(rec.uri, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+            const audioBase64 = `data:audio/m4a;base64,${b64}`;
+
             const metaPayload = {
                 storageKey: fileKey,
                 s3Key: fileKey,
@@ -739,7 +800,8 @@ export default function RecordingScreen({ token, onLogout }) {
                 confidence: rec.confidence || 85,
                 intensityDb: rec.intensityDb || 55,
                 detectedAt: detectedAtIso,
-                sessionGroup: `night_${detectedAtIso.slice(0, 10)}`,
+                sessionGroup: `night_${sessionDate}`,
+                sessionDate,
             };
 
             if (provider === 'local') {
@@ -768,6 +830,8 @@ export default function RecordingScreen({ token, onLogout }) {
             return false;
         }
     };
+
+
 
     const handleManualUpload = async (rec) => {
         if (rec.isCloud || uploadedIds.has(rec.filename) || uploadedIds.has(rec.id)) {
@@ -840,20 +904,28 @@ export default function RecordingScreen({ token, onLogout }) {
         }
 
         await unloadSound();
-        monitorActiveRef.current = true;
+
+        // Reset state for new night
+        nightEventsRef.current = [];
+        lastEventMs.current = {};
         capturingRef.current = false;
+        monitorActiveRef.current = true;
         monitorStartTimestampRef.current = Date.now();
+
         setIsMonitoring(true);
         setIsCapturing(false);
         setMonitorSeconds(0);
         setCurrentDb(-160);
+        setNightStats({ snore: 0, breathing: 0, cough: 0, voice: 0, movement: 0, unknown: 0, totalEvents: 0 });
 
         monitorTimerRef.current = setInterval(() => {
             setMonitorSeconds((s) => s + 1);
         }, 1000);
 
-        listenContinuously();
+        // Start the continuous night recording
+        startNightRecording();
     };
+
 
     const stopSmartMonitoring = async () => {
         monitorActiveRef.current = false;
@@ -867,52 +939,111 @@ export default function RecordingScreen({ token, onLogout }) {
             monitorTimerRef.current = null;
         }
 
+        // Capture exact timing BEFORE clearing refs
+        const endTimeMs = Date.now();
+        const startTimeMs = monitorStartTimestampRef.current || (endTimeMs - Math.max(60, monitorSeconds) * 1000);
+        monitorStartTimestampRef.current = null;
+
+        // Snapshot event markers NOW (solves stale-state bug: previously eventsCount was always 0)
+        const capturedEvents = [...nightEventsRef.current];
+        nightEventsRef.current = [];
+
+        const start = new Date(startTimeMs);
+        const end   = new Date(endTimeMs);
+        const elapsedMinutes = Math.max(1, Math.round((endTimeMs - startTimeMs) / 60000));
+        const sessionDateStr  = start.toISOString().slice(0, 10);
+
+        // ── 1. Save the continuous night recording to a permanent file ──────────
         if (listenerRecRef.current) {
             try {
                 await listenerRecRef.current.stopAndUnloadAsync();
-            } catch (_) {}
+                const tempUri = listenerRecRef.current.getURI();
+                listenerRecRef.current = null;
+
+                if (tempUri) {
+                    const dir = getBaseDir();
+                    const filename = `noche_${sessionDateStr}_${startTimeMs}.m4a`;
+                    const destUri  = dir + filename;
+
+                    if (dir && tempUri !== destUri) {
+                        await FileSystem.copyAsync({ from: tempUri, to: destUri });
+                    }
+
+                    const nightLabel = `🌙 Noche del ${start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+                    const metaIndex = await loadMetadataIndex();
+                    metaIndex[filename] = {
+                        filename,
+                        label: nightLabel,
+                        eventType: 'night_session',
+                        soundEvents: capturedEvents,
+                        sessionDate: sessionDateStr,
+                        startTimestamp: startTimeMs,
+                        endTimestamp: endTimeMs,
+                        durationMs: endTimeMs - startTimeMs,
+                        eventsCount: capturedEvents.length,
+                        confidence: 100,
+                        intensityDb: 55,
+                        timestamp: startTimeMs,
+                        isNightSession: true,
+                    };
+                    await saveMetadataIndex(metaIndex);
+
+                    // Upload metadata-only (no base64 for large night files)
+                    if (token) {
+                        const info = await FileSystem.getInfoAsync(destUri, { size: true });
+                        const sizeKb = info.size ? Math.round(info.size / 1024) : 0;
+                        uploadToCloud({
+                            id: filename, filename, uri: destUri,
+                            eventType: 'night_session',
+                            confidence: 100, intensityDb: 55,
+                            durationSecs: Math.round((endTimeMs - startTimeMs) / 1000),
+                            durationMs: endTimeMs - startTimeMs,
+                            soundEvents: capturedEvents,
+                            sessionDate: sessionDateStr,
+                            eventsCount: capturedEvents.length,
+                            isNightSession: true,
+                            isLargeFile: sizeKb > 3000, // skip base64 for files > 3 MB
+                            timestamp: startTimeMs,
+                        }).then((ok) => {
+                            if (ok) setUploadedIds((prev) => new Set([...prev, filename]));
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('[stopSmartMonitoring save night rec]', err.message);
+                try { listenerRecRef.current = null; } catch (_) {}
+            }
+        } else {
             listenerRecRef.current = null;
         }
 
         await refreshRecordings();
 
-        // Duración Real del Sueño: Calculada estrictamente entre que se presiona Iniciar y Detener
-        const endTimeMs = Date.now();
-        const startTimeMs = monitorStartTimestampRef.current || (endTimeMs - Math.max(60, monitorSeconds) * 1000);
-        monitorStartTimestampRef.current = null;
-
-        const start = new Date(startTimeMs);
-        const end = new Date(endTimeMs);
-        const elapsedMinutes = Math.max(1, Math.round((endTimeMs - startTimeMs) / 60000));
-
-        // Filtrar grabaciones reales que ocurrieron durante esta noche
-        const sessionRecordings = localRecordings.filter((r) => {
-            if (!r.modTime && !r.timestamp) return true;
-            const rTime = r.modTime || new Date(r.timestamp).getTime();
-            return rTime >= startTimeMs - 5000 && rTime <= endTimeMs + 5000;
-        });
-
+        // ── 2. Night Engine analysis ────────────────────────────────────────────
         readNightHealthMetrics({ startTime: start, endTime: end }).then(async (healthData) => {
             const correlated = processNightEngineCorrelation({
-                audioEvents: sessionRecordings,
+                audioEvents: capturedEvents,
                 healthData,
                 sessionWindow: {
                     startTime: start,
                     endTime: end,
-                    sessionDate: start.toISOString().slice(0, 10),
+                    sessionDate: sessionDateStr,
                     durationMinutes: elapsedMinutes
                 },
                 baselineProfile: sleepProfile
             });
 
-            // Forzar que los desgloses reflejen la duración real exacta
+            // Attach real event data & enforce actual durations
             if (correlated.sleepBreakdown) {
                 correlated.sleepBreakdown.totalMonitoredMinutes = elapsedMinutes;
-                correlated.sleepBreakdown.actualSleepMinutes = elapsedMinutes;
+                correlated.sleepBreakdown.actualSleepMinutes    = elapsedMinutes;
             }
             if (correlated.sleepSummary) {
                 correlated.sleepSummary.durationMinutes = elapsedMinutes;
             }
+            correlated.soundEvents   = capturedEvents;
+            correlated.eventsCount   = capturedEvents.length;
+            correlated.sessionDate   = sessionDateStr;
 
             setNightAnalysis(correlated);
             await saveSessionToCache(correlated);
@@ -928,17 +1059,18 @@ export default function RecordingScreen({ token, onLogout }) {
             setActiveTab('score');
 
             Alert.alert(
-                '🌙 Noche Registrada con Éxito',
-                `Duración monitoreada: ${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m\n` +
-                `Einsdream Score: ${correlated.einsdreamScore.totalScore}/100\n\n` +
-                `• Eventos acústicos capturados: ${sessionRecordings.length}\n` +
+                '🌙 Noche Registrada',
+                `Duración: ${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m\n` +
+                `Score: ${correlated.einsdreamScore.totalScore}/100\n\n` +
+                `• Eventos detectados: ${capturedEvents.length}\n` +
                 `• Calidad acústica: ${correlated.einsdreamScore.qualityScore}%\n\n` +
-                `Revisa el desglose completo en la pestaña "Score".`
+                `Audio nocturno guardado. Ve a la pestaña Audios para ver la línea de tiempo.`
             );
         });
     };
 
-    const listenContinuously = async () => {
+    // ─── Grabación Continua Nocturna & Detección de Eventos (v2.4.0) ──────────
+    const startNightRecording = async () => {
         if (!monitorActiveRef.current) return;
 
         try {
@@ -962,16 +1094,21 @@ export default function RecordingScreen({ token, onLogout }) {
             dbSamplesRef.current = [];
 
             const { recording } = await Audio.Recording.createAsync(
-                RECORDING_OPTIONS,
+                NIGHT_RECORDING_OPTIONS,
                 (status) => {
-                    if (status.metering !== undefined) {
-                        const db = Math.round(status.metering);
-                        setCurrentDb(db);
-                        dbSamplesRef.current.push(db);
+                    if (!status.isRecording) return;
+                    const db = typeof status.metering === 'number' ? Math.round(status.metering) : -160;
+                    setCurrentDb(db);
 
-                        if (db > NOISE_THRESHOLD_DB && !capturingRef.current && monitorActiveRef.current) {
-                            captureDetectedEvent();
-                        }
+                    // Track running window of samples for variance / classification
+                    dbSamplesRef.current.push(db);
+                    if (dbSamplesRef.current.length > 20) {
+                        dbSamplesRef.current.shift();
+                    }
+
+                    // Check if threshold exceeded
+                    if (db > NOISE_THRESHOLD_DB) {
+                        logAcousticEvent(db);
                     }
                 },
                 300
@@ -979,108 +1116,52 @@ export default function RecordingScreen({ token, onLogout }) {
 
             listenerRecRef.current = recording;
         } catch (err) {
-            console.warn('[listenContinuously]', err.message);
+            console.warn('[startNightRecording]', err.message);
             if (monitorActiveRef.current) {
-                setTimeout(() => listenContinuously(), 1500);
+                setTimeout(() => startNightRecording(), 1500);
             }
         }
     };
 
-    // captureDetectedEvent: the mic has been running for ~5s already (pre-buffer),
-    // so we continue recording for POST_CAPTURE_SECONDS (15s) more, then save the
-    // full clip (≈20s: 5s pre-sound + 15s post-sound) and restart continuous listening.
-    const captureDetectedEvent = async () => {
-        if (capturingRef.current || !monitorActiveRef.current) return;
-        capturingRef.current = true;
-        setIsCapturing(true);
+    const logAcousticEvent = (currentDbVal) => {
+        if (!monitorActiveRef.current) return;
+        const now = Date.now();
+        const startMs = monitorStartTimestampRef.current || now;
+        const relativeMs = now - startMs;
 
-        // Wait POST_CAPTURE_SECONDS (15s) after the trigger — the clip will include
-        // ~5s of audio before the trigger (because the recorder was already running).
-        await new Promise((r) => setTimeout(r, POST_CAPTURE_SECONDS * 1000));
-        if (!monitorActiveRef.current) {
-            capturingRef.current = false;
-            setIsCapturing(false);
+        // Compute running stats from samples
+        const samples = dbSamplesRef.current.length > 0 ? dbSamplesRef.current : [currentDbVal];
+        const avgDb = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+        const maxDb = Math.max(...samples);
+
+        const classification = classifyAcousticEvent({ avgDb, maxDb });
+        const { eventType, label, confidence } = classification;
+
+        // Debounce by event type so we don't spam 5 events for a single 3-second snore or cough
+        const lastTime = lastEventMs.current[eventType] || 0;
+        if (now - lastTime < EVENT_DEBOUNCE_MS) {
             return;
         }
+        lastEventMs.current[eventType] = now;
 
-        const rec = listenerRecRef.current;
-        listenerRecRef.current = null;
+        const eventMarker = {
+            relativeMs,
+            timestamp: new Date(now).toISOString(),
+            eventType,
+            label,
+            confidence,
+            intensityDb: currentDbVal,
+        };
 
-        if (rec) {
-            try {
-                await rec.stopAndUnloadAsync();
-                const tempUri = rec.getURI();
+        nightEventsRef.current.push(eventMarker);
 
-                if (tempUri) {
-                    const dir = getBaseDir();
-                    const ts = Date.now();
-
-                    const samples = dbSamplesRef.current.length > 0 ? dbSamplesRef.current : [-30];
-                    const avgDb = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
-                    const maxDb = Math.max(...samples);
-
-                    const analysis = classifyAcousticEvent({
-                        durationSecs: TOTAL_CAPTURE_SECONDS,
-                        avgDb,
-                        maxDb,
-                    });
-
-                    const filename = `evento_${analysis.eventType}_${ts}.m4a`;
-                    const destUri = dir ? dir + filename : tempUri;
-
-                    if (dir && tempUri !== destUri) {
-                        await FileSystem.copyAsync({ from: tempUri, to: destUri });
-                    }
-
-                    const approxSpl = Math.max(35, Math.min(95, Math.round(95 + maxDb)));
-
-                    const metaIndex = await loadMetadataIndex();
-                    metaIndex[filename] = {
-                        filename,
-                        label: `${analysis.label} (${analysis.confidence}%)`,
-                        eventType: analysis.eventType,
-                        confidence: analysis.confidence,
-                        intensityDb: approxSpl,
-                        durationSecs: TOTAL_CAPTURE_SECONDS,
-                        timestamp: ts,
-                    };
-                    await saveMetadataIndex(metaIndex);
-
-                    setNightStats((prev) => ({
-                        ...prev,
-                        [analysis.eventType]: (prev[analysis.eventType] || 0) + 1,
-                        totalEvents: prev.totalEvents + 1,
-                    }));
-
-                    await refreshRecordings();
-
-                    uploadToCloud({
-                        id: filename,
-                        filename,
-                        uri: destUri,
-                        eventType: analysis.eventType,
-                        confidence: analysis.confidence,
-                        intensityDb: approxSpl,
-                        durationSecs: TOTAL_CAPTURE_SECONDS,
-                        timestamp: ts,
-                    }).then((ok) => {
-                        if (ok) setUploadedIds((prev) => new Set([...prev, filename]));
-                    });
-                }
-            } catch (err) {
-                console.warn('[captureDetectedEvent]', err.message);
-            }
-        }
-
-        capturingRef.current = false;
-        setIsCapturing(false);
-
-        if (monitorActiveRef.current) {
-            listenContinuously();
-        }
+        // Update live stats in UI
+        setNightStats((prev) => ({
+            ...prev,
+            [eventType]: (prev[eventType] || 0) + 1,
+            totalEvents: (prev.totalEvents || 0) + 1,
+        }));
     };
-
-    // ─── PRUEBA DE MICRÓFONO 5s ───────────────────────────────────────────────
     const runVoiceTest = async () => {
         if (isTesting || isMonitoring) return;
 
@@ -1192,7 +1273,7 @@ export default function RecordingScreen({ token, onLogout }) {
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.3.2 (Estable)</Text>
+                    <Text style={s.versionText}>v2.4.0 (Estable)</Text>
                 </View>
             </View>
 
@@ -1244,8 +1325,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     <View style={s.infoCard}>
                         <Text style={s.infoTitle}>🌙 EinsDream 2026: IA Acústica On-Device</Text>
                         <Text style={s.infoText}>
-                            El micrófono permanece en escucha atenta en silencio pero <Text style={{ fontWeight: '700' }}>no graba 8 horas continuas</Text>.
-                            Solo captura eventos acústicos clave (ronquidos, tos, respiración) con clasificación local a $0.
+                            EinsDream graba <Text style={{ fontWeight: '700' }}>toda la noche en baja calidad (32 kbps)</Text> para generar un audio continuo. Durante el sueño detecta eventos acústicos (ronquidos, tos, respiración) y los marca en la línea de tiempo del audio. El audio queda en tu teléfono y tú decides cuándo eliminarlo.
                         </Text>
                         <View style={s.quotaRow}>
                             <Text style={s.quotaText}>
@@ -1585,145 +1665,275 @@ export default function RecordingScreen({ token, onLogout }) {
             {/* ═══════════════════════════════════════════════════════════════════ */}
             {/* PESTAÑA 4: 🎧 GRABACIONES & AUDIOS LOCALES                        */}
             {/* ═══════════════════════════════════════════════════════════════════ */}
-            {activeTab === 'recordings' && (
-                <View style={s.recCard}>
-                    <View style={s.recHeader}>
-                        <Text style={s.recTitle}>🎧 Mis Grabaciones ({localRecordings.length})</Text>
-                        <TouchableOpacity style={s.refreshBtn} onPress={refreshRecordings} disabled={loadingRecs}>
-                            <Text style={s.refreshBtnText}>🔄 Actualizar</Text>
-                        </TouchableOpacity>
-                    </View>
+            {activeTab === 'recordings' && (() => {
+                // ── Helper: derive a date section from a recording ──────────────
+                const getSectionTitle = (rec) => {
+                    const now = new Date();
+                    const today = now.toISOString().slice(0, 10);
+                    const yesterday = new Date(now - 86400000).toISOString().slice(0, 10);
+                    const startOfWeek = new Date(now);
+                    startOfWeek.setDate(now.getDate() - now.getDay());
+                    const startOfLastWeek = new Date(+startOfWeek - 7 * 86400000);
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    const d = rec.sessionDate || new Date(rec.modTime || Date.now()).toISOString().slice(0, 10);
+                    const dObj = new Date(d + 'T12:00:00');
+                    if (d === today)   return 'Hoy';
+                    if (d === yesterday) return 'Ayer';
+                    if (dObj >= startOfWeek) return 'Esta Semana';
+                    if (dObj >= startOfLastWeek) return 'Semana Anterior';
+                    if (dObj >= startOfMonth) return 'Este Mes';
+                    return dObj.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+                };
+                const grouped = {};
+                const sectionOrder = [];
+                [...localRecordings].sort((a, b) => b.modTime - a.modTime).forEach(rec => {
+                    const sec = getSectionTitle(rec);
+                    if (!grouped[sec]) { grouped[sec] = []; sectionOrder.push(sec); }
+                    grouped[sec].push(rec);
+                });
 
-                    {/* Aviso de Privacidad y Origen Exclusivo del Micrófono Nocturno */}
-                    <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', borderRadius: 10, padding: 10, marginBottom: 14 }}>
-                        <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '700', marginBottom: 2 }}>
-                            🎙️ Grabaciones en Vivo del Micrófono Nocturno
-                        </Text>
-                        <Text style={{ color: '#94a3b8', fontSize: 10, lineHeight: 14 }}>
-                            Estos audios corresponden únicamente al sonido ambiental capturado por el micrófono del teléfono mientras el monitoreo nocturno estuvo activo. EinsDream funciona en un entorno seguro y aislado: nunca accede a WhatsApp ni a archivos personales del teléfono.
-                        </Text>
-                    </View>
+                // ── Helper: event type → color ──────────────────────────────────
+                const evColor = (type) => {
+                    switch (type) {
+                        case 'snore': return '#f59e0b';
+                        case 'cough': return '#ef4444';
+                        case 'voice': return '#38bdf8';
+                        case 'breathing': return '#34d399';
+                        default: return '#94a3b8';
+                    }
+                };
 
-                    {/* Botón de Sincronización en Bloque para grabaciones offline */}
-                    {(() => {
-                        const pendingCount = localRecordings.filter(
-                            (r) => !r.isCloud && !uploadedIds.has(r.filename) && !uploadedIds.has(r.id)
-                        ).length;
-                        if (pendingCount === 0) return null;
-                        return (
-                            <TouchableOpacity
-                                style={[s.syncAllBtn, isSyncingAll && { opacity: 0.7 }]}
-                                onPress={syncAllPendingRecordings}
-                                disabled={isSyncingAll}
-                            >
-                                {isSyncingAll ? (
-                                    <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
-                                ) : (
-                                    <Text style={{ fontSize: 13, marginRight: 6 }}>☁️</Text>
-                                )}
-                                <Text style={s.syncAllBtnText}>
-                                    {isSyncingAll
-                                        ? `Sincronizando (${syncProgress.done}/${syncProgress.total})...`
-                                        : `Sincronizar con la nube (${pendingCount} pendientes)`}
-                                </Text>
+                return (
+                    <View style={s.recCard}>
+                        <View style={s.recHeader}>
+                            <Text style={s.recTitle}>🎧 Audios Nocturnos</Text>
+                            <TouchableOpacity style={s.refreshBtn} onPress={refreshRecordings} disabled={loadingRecs}>
+                                <Text style={s.refreshBtnText}>🔄</Text>
                             </TouchableOpacity>
-                        );
-                    })()}
+                        </View>
 
-                    {loadingRecs ? (
-                        <ActivityIndicator size="large" color="#38bdf8" style={{ marginVertical: 24 }} />
-                    ) : localRecordings.length === 0 ? (
-                        <View style={s.emptyBox}>
-                            <Text style={s.emptyTitle}>Aún no hay grabaciones</Text>
-                            <Text style={s.emptyText}>
-                                {'Toca "Probar micrófono" en la pestaña de monitoreo o deja el sensor activo al acostarte.'}
+                        {/* Aviso de Privacidad y Origen Exclusivo del Micrófono Nocturno */}
+                        <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.25)', borderRadius: 10, padding: 10, marginBottom: 14 }}>
+                            <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '700', marginBottom: 2 }}>
+                                🎙️ Grabaciones en Vivo del Micrófono Nocturno
+                            </Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 10, lineHeight: 14 }}>
+                                Estos audios corresponden únicamente al sonido ambiental capturado por el micrófono del teléfono mientras el monitoreo nocturno estuvo activo. EinsDream funciona en un entorno seguro y aislado: nunca accede a WhatsApp ni a archivos personales del teléfono.
                             </Text>
                         </View>
-                    ) : (
-                        localRecordings.map((rec) => {
-                            const isSelected = playingUri === rec.id || playingUri === rec.uri;
-                            const isThisPlaying = isSelected && playing;
-                            const isUploaded = rec.isCloud || rec.isUploaded || uploadedIds.has(rec.filename) || uploadedIds.has(rec.id);
-                            const isUploading = uploadingId === rec.id;
-                            const progress = isSelected && durMs > 0 ? posMs / durMs : 0;
 
+                        {/* Sync button */}
+                        {(() => {
+                            const pendingCount = localRecordings.filter(
+                                (r) => !r.isCloud && !uploadedIds.has(r.filename) && !uploadedIds.has(r.id)
+                            ).length;
+                            if (pendingCount === 0) return null;
                             return (
-                                <View key={rec.id} style={[s.recItem, isSelected && s.recItemActive]}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={s.recLabel}>{rec.label}</Text>
-                                        <Text style={s.recMeta}>
-                                            {rec.dateStr} · {rec.sizeKb} KB {isUploaded ? '· ☁️ Sincronizado' : '· ⏳ Local'}
+                                <TouchableOpacity
+                                    style={[s.syncAllBtn, isSyncingAll && { opacity: 0.7 }]}
+                                    onPress={syncAllPendingRecordings}
+                                    disabled={isSyncingAll}
+                                >
+                                    {isSyncingAll ? (
+                                        <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                                    ) : (
+                                        <Text style={{ fontSize: 13, marginRight: 6 }}>☁️</Text>
+                                    )}
+                                    <Text style={s.syncAllBtnText}>
+                                        {isSyncingAll
+                                            ? `Sincronizando (${syncProgress.done}/${syncProgress.total})...`
+                                            : `Sincronizar metadatos (${pendingCount} pendientes)`}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })()}
+
+                        {loadingRecs ? (
+                            <ActivityIndicator size="large" color="#38bdf8" style={{ marginVertical: 24 }} />
+                        ) : localRecordings.length === 0 ? (
+                            <View style={s.emptyBox}>
+                                <Text style={s.emptyTitle}>Aún no hay grabaciones</Text>
+                                <Text style={s.emptyText}>
+                                    {'Activa el monitoreo nocturno y pulsa Detener al despertar para guardar el audio.'}
+                                </Text>
+                            </View>
+                        ) : (
+                            sectionOrder.map((section) => (
+                                <View key={section}>
+                                    {/* ─── Section Header ─────────────────────────── */}
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, marginBottom: 6 }}>
+                                        <View style={{ height: 1, flex: 1, backgroundColor: '#1e293b' }} />
+                                        <Text style={{ color: '#475569', fontSize: 10, fontWeight: '700', marginHorizontal: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                                            {section}
                                         </Text>
-
-                                        {/* Enhanced Audio Controls */}
-                                        {isSelected && durMs > 0 && (
-                                            <View style={s.playerControls}>
-                                                {/* Touchable seek bar */}
-                                                <TouchableOpacity
-                                                    activeOpacity={0.8}
-                                                    style={s.seekBarTrack}
-                                                    onPress={(e) => {
-                                                        const { locationX } = e.nativeEvent;
-                                                        e.target.measure((fx, fy, width) => {
-                                                            handleSeek(Math.max(0, Math.min(1, locationX / (width || 1))));
-                                                        });
-                                                    }}
-                                                >
-                                                    <View style={[s.seekBarFill, { flex: Math.max(0.001, progress) }]} />
-                                                    <View style={{ flex: Math.max(0.001, 1 - progress) }} />
-                                                </TouchableOpacity>
-
-                                                {/* Time + skip controls row */}
-                                                <View style={s.playerRow}>
-                                                    <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(-10)}>
-                                                        <Text style={s.skipBtnText}>⏪ 10s</Text>
-                                                    </TouchableOpacity>
-                                                    <Text style={s.timeText}>{fmtMs(posMs)} / {fmtMs(durMs)}</Text>
-                                                    <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(10)}>
-                                                        <Text style={s.skipBtnText}>10s ⏩</Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </View>
-                                        )}
+                                        <View style={{ height: 1, flex: 1, backgroundColor: '#1e293b' }} />
                                     </View>
 
-                                    {/* Play / Pause */}
-                                    <TouchableOpacity
-                                        style={[s.iconBtn, { backgroundColor: isThisPlaying ? '#d97706' : '#16a34a' }]}
-                                        onPress={() => handlePlayPause(rec)}
-                                    >
-                                        <Text style={s.iconBtnText}>{isThisPlaying ? '⏸' : '▶'}</Text>
-                                    </TouchableOpacity>
+                                    {grouped[section].map((rec) => {
+                                        const isSelected = playingUri === rec.id || playingUri === rec.uri;
+                                        const isThisPlaying = isSelected && playing;
+                                        const isUploaded = rec.isCloud || rec.isUploaded || uploadedIds.has(rec.filename) || uploadedIds.has(rec.id);
+                                        const isUploading = uploadingId === rec.id;
+                                        const progress = isSelected && durMs > 0 ? posMs / durMs : 0;
+                                        const events = rec.soundEvents || [];
+                                        const nightDurationMs = (isSelected && durMs > 0) ? durMs : (rec.durationMs || 0);
 
-                                    {/* Subir a la Nube */}
-                                    <TouchableOpacity
-                                        style={[
-                                            s.iconBtn,
-                                            { backgroundColor: isUploaded ? '#7c3aed' : '#2563eb', marginLeft: 6 },
-                                        ]}
-                                        onPress={() => handleManualUpload(rec)}
-                                        disabled={isUploading}
-                                    >
-                                        {isUploading ? (
-                                            <ActivityIndicator size="small" color="#fff" />
-                                        ) : (
-                                            <Text style={s.iconBtnText}>{isUploaded ? '✓' : '☁'}</Text>
-                                        )}
-                                    </TouchableOpacity>
+                                        return (
+                                            <View key={rec.id} style={[s.recItem, isSelected && s.recItemActive, rec.isNightSession && { borderLeftWidth: 3, borderLeftColor: '#38bdf8' }]}>
+                                                <View style={{ flex: 1 }}>
+                                                    {/* Label + date */}
+                                                    <Text style={s.recLabel}>{rec.label}</Text>
+                                                    <Text style={s.recMeta}>
+                                                        {rec.dateStr} · {rec.sizeKb >= 1024 ? `${(rec.sizeKb / 1024).toFixed(1)} MB` : `${rec.sizeKb} KB`}
+                                                        {rec.isNightSession ? ` · ${events.length} evento${events.length !== 1 ? 's' : ''}` : ''}
+                                                        {isUploaded ? ' · ☁️ Sincronizado' : ' · ⏳ Local'}
+                                                    </Text>
 
-                                    {/* Eliminar */}
-                                    <TouchableOpacity
-                                        style={[s.iconBtn, { backgroundColor: '#ef4444', marginLeft: 6 }]}
-                                        onPress={() => handleDelete(rec)}
-                                    >
-                                        <Text style={s.iconBtnText}>🗑</Text>
-                                    </TouchableOpacity>
+                                                    {/* ─── Night Timeline Bar ──────────── */}
+                                                    {rec.isNightSession && nightDurationMs > 0 && (
+                                                        <View style={{ marginTop: 8 }}>
+                                                            <Text style={{ color: '#64748b', fontSize: 9, marginBottom: 3, fontWeight: '700' }}>
+                                                                LÍNEA DE TIEMPO NOCTURNA · {fmtMs(isSelected ? posMs : 0)} / {fmtMs(nightDurationMs)}
+                                                            </Text>
+                                                            <View
+                                                                style={{ height: 44, backgroundColor: '#0f172a', borderRadius: 8, overflow: 'visible', position: 'relative' }}
+                                                                onLayout={() => {}}
+                                                            >
+                                                                {/* Seek target (full bar) */}
+                                                                <TouchableOpacity
+                                                                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 8, overflow: 'hidden' }}
+                                                                    activeOpacity={0.9}
+                                                                    onPress={(e) => {
+                                                                        if (!isSelected) handlePlayPause(rec);
+                                                                        // Rough seek via locationX — layout width not directly available here
+                                                                    }}
+                                                                >
+                                                                    {/* Progress fill */}
+                                                                    {isSelected && durMs > 0 && (
+                                                                        <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(100, progress * 100)}%`, backgroundColor: 'rgba(56,189,248,0.18)', borderRadius: 8 }} />
+                                                                    )}
+                                                                </TouchableOpacity>
+
+                                                                {/* Event dots */}
+                                                                {events.map((evt, i) => {
+                                                                    const leftPct = nightDurationMs > 0 ? Math.min(95, Math.max(0, (evt.relativeMs / nightDurationMs) * 100)) : 0;
+                                                                    return (
+                                                                        <TouchableOpacity
+                                                                            key={i}
+                                                                            style={{
+                                                                                position: 'absolute',
+                                                                                left: `${leftPct}%`,
+                                                                                top: '50%',
+                                                                                marginTop: -7,
+                                                                                marginLeft: -7,
+                                                                                width: 14,
+                                                                                height: 14,
+                                                                                borderRadius: 7,
+                                                                                backgroundColor: evColor(evt.eventType),
+                                                                                borderWidth: 1.5,
+                                                                                borderColor: '#0f172a',
+                                                                                zIndex: 20,
+                                                                            }}
+                                                                            onPress={() => {
+                                                                                if (!isSelected) {
+                                                                                    handlePlayPause(rec);
+                                                                                } else {
+                                                                                    handleSeek(evt.relativeMs / nightDurationMs);
+                                                                                }
+                                                                            }}
+                                                                        />
+                                                                    );
+                                                                })}
+
+                                                                {/* Playhead */}
+                                                                {isSelected && durMs > 0 && (
+                                                                    <View style={{ position: 'absolute', top: 0, bottom: 0, left: `${Math.min(99, progress * 100)}%`, width: 2, backgroundColor: '#38bdf8', zIndex: 5 }} />
+                                                                )}
+                                                            </View>
+
+                                                            {/* Legend */}
+                                                            {events.length > 0 && (
+                                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 8 }}>
+                                                                    {[...new Set(events.map(e => e.eventType))].map(type => (
+                                                                        <View key={type} style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                                                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: evColor(type) }} />
+                                                                            <Text style={{ color: '#94a3b8', fontSize: 9 }}>
+                                                                                {type === 'snore' ? 'Ronquido' : type === 'cough' ? 'Tos' : type === 'voice' ? 'Voz' : type === 'breathing' ? 'Respiración' : type}
+                                                                                {' ('}{events.filter(e => e.eventType === type).length}{')'}
+                                                                            </Text>
+                                                                        </View>
+                                                                    ))}
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    )}
+
+                                                    {/* ─── Seek Bar (all audios when playing) ─── */}
+                                                    {isSelected && durMs > 0 && (
+                                                        <View style={s.playerControls}>
+                                                            <TouchableOpacity
+                                                                activeOpacity={0.8}
+                                                                style={s.seekBarTrack}
+                                                                onPress={(e) => {
+                                                                    const { locationX } = e.nativeEvent;
+                                                                    e.target.measure((fx, fy, width) => {
+                                                                        handleSeek(Math.max(0, Math.min(1, locationX / (width || 1))));
+                                                                    });
+                                                                }}
+                                                            >
+                                                                <View style={[s.seekBarFill, { flex: Math.max(0.001, progress) }]} />
+                                                                <View style={{ flex: Math.max(0.001, 1 - progress) }} />
+                                                            </TouchableOpacity>
+                                                            <View style={s.playerRow}>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(-10)}>
+                                                                    <Text style={s.skipBtnText}>⏪ 10s</Text>
+                                                                </TouchableOpacity>
+                                                                <Text style={s.timeText}>{fmtMs(posMs)} / {fmtMs(durMs)}</Text>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(10)}>
+                                                                    <Text style={s.skipBtnText}>10s ⏩</Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                        </View>
+                                                    )}
+                                                </View>
+
+                                                {/* Play / Pause */}
+                                                <TouchableOpacity
+                                                    style={[s.iconBtn, { backgroundColor: isThisPlaying ? '#d97706' : '#16a34a' }]}
+                                                    onPress={() => handlePlayPause(rec)}
+                                                >
+                                                    <Text style={s.iconBtnText}>{isThisPlaying ? '⏸' : '▶'}</Text>
+                                                </TouchableOpacity>
+
+                                                {/* Sync to cloud */}
+                                                <TouchableOpacity
+                                                    style={[s.iconBtn, { backgroundColor: isUploaded ? '#7c3aed' : '#2563eb', marginLeft: 6 }]}
+                                                    onPress={() => handleManualUpload(rec)}
+                                                    disabled={isUploading}
+                                                >
+                                                    {isUploading ? (
+                                                        <ActivityIndicator size="small" color="#fff" />
+                                                    ) : (
+                                                        <Text style={s.iconBtnText}>{isUploaded ? '✓' : '☁'}</Text>
+                                                    )}
+                                                </TouchableOpacity>
+
+                                                {/* Delete */}
+                                                <TouchableOpacity
+                                                    style={[s.iconBtn, { backgroundColor: '#ef4444', marginLeft: 6 }]}
+                                                    onPress={() => handleDelete(rec)}
+                                                >
+                                                    <Text style={s.iconBtnText}>🗑</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        );
+                                    })}
                                 </View>
-                            );
-                        })
-                    )}
-                </View>
-            )}
+                            ))
+                        )}
+                    </View>
+                );
+            })()}
 
             {/* Modal de Sleep Test Interactivo */}
             <SleepTestModal
