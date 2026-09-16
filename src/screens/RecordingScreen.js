@@ -8,7 +8,7 @@
  *    - Escucha silenciosa con VAD y medidor de decibelios en vivo.
  *    - IA Acústica On-Device (clasificación $0 de ronquido, tos, respiración, voz, movimiento).
  *    - Prueba rápida de 5 segundos con auto-reproducción inmediata.
- *    - Memoria protegida de 100 MB con política FIFO.
+ *    - Memoria protegida de 500 MB con política FIFO.
  * 2. 📊 Einsdream Score & Dimensiones:
  *    - Score Global (0 - 100) sustentado en 3 Pilares con prioridad a la Regularidad (40%).
  *    - Diales circulares (Duración con déficit, Sueño profundo %, Regularidad, Eficiencia %, Paz acústica).
@@ -110,7 +110,7 @@ const NIGHT_RECORDING_OPTIONS = {
 };
 // Event debounce: minimum seconds between two logged events of the same type
 const EVENT_DEBOUNCE_MS    = 30000;
-const MAX_STORAGE_MB       = 100;
+const MAX_STORAGE_MB       = 500;
 const INDEX_FILENAME        = 'einsdream_events_index.json';
 const PROFILE_FILENAME      = 'einsdream_sleep_profile.json';
 const SESSIONS_CACHE_FILENAME = 'einsdream_sessions_cache.json';
@@ -462,6 +462,40 @@ export default function RecordingScreen({ token, onLogout }) {
             }
 
             const metaIndex = await loadMetadataIndex();
+                        // ─── 0. Rescate Automático de Grabaciones en Caché de Expo ─────────────
+            try {
+                const cacheAudioDir = `${FileSystem.cacheDirectory}Audio/`;
+                const cacheInfo = await FileSystem.getInfoAsync(cacheAudioDir);
+                if (cacheInfo.exists && cacheInfo.isDirectory) {
+                    const cacheFiles = await FileSystem.readDirectoryAsync(cacheAudioDir);
+                    for (const cf of cacheFiles) {
+                        if (cf.endsWith('.m4a')) {
+                            const cUri = cacheAudioDir + cf;
+                            const cStat = await FileSystem.getInfoAsync(cUri, { size: true });
+                            // Si es un audio nocturno (> 300 KB) huérfano, rescatarlo a Documentos
+                            if (cStat.exists && cStat.size > 300 * 1024) {
+                                const destName = `noche_recuperada_${Date.now()}.m4a`;
+                                const destUri = dir + destName;
+                                await FileSystem.copyAsync({ from: cUri, to: destUri });
+                                metaIndex[destName] = {
+                                    filename: destName,
+                                    label: '🌙 Noche Recuperada (Caché)',
+                                    eventType: 'night_session',
+                                    isNightSession: true,
+                                    sizeBytes: cStat.size,
+                                    timestamp: cStat.modificationTime || Date.now(),
+                                    durationMs: Math.round((cStat.size / 4000) * 1000),
+                                };
+                                await saveMetadataIndex(metaIndex);
+                                await FileSystem.deleteAsync(cUri, { idempotent: true });
+                            }
+                        }
+                    }
+                }
+            } catch (errRescue) {
+                console.warn('[rescueOrphanRecordings]', errRescue.message);
+            }
+
             const files = await FileSystem.readDirectoryAsync(dir);
             const list = [];
             let totalBytes = 0;
@@ -566,16 +600,33 @@ export default function RecordingScreen({ token, onLogout }) {
 
             list.sort((a, b) => b.modTime - a.modTime);
 
-            // Memoria Protegida: 100 MB FIFO
+            // Memoria Protegida: 500 MB FIFO (Protección absoluta de sesiones nocturnas)
             const maxBytes = MAX_STORAGE_MB * 1024 * 1024;
-            if (totalBytes > maxBytes && list.length > 5) {
-                while (totalBytes > maxBytes && list.length > 5) {
-                    const oldest = list.pop();
+            if (totalBytes > maxBytes) {
+                // Paso 1: Purgar primero grabaciones cortas de prueba de micrófono ('prueba_')
+                const testRecs = list.filter(r => !r.isCloud && r.filename && r.filename.startsWith('prueba_'));
+                testRecs.sort((a, b) => (a.modTime || 0) - (b.modTime || 0));
+                for (const testRec of testRecs) {
+                    if (totalBytes <= maxBytes) break;
                     try {
-                        await FileSystem.deleteAsync(oldest.uri, { idempotent: true });
-                        totalBytes -= oldest.sizeBytes;
-                        delete metaIndex[oldest.filename];
+                        await FileSystem.deleteAsync(testRec.uri, { idempotent: true });
+                        totalBytes -= testRec.sizeBytes;
+                        delete metaIndex[testRec.filename];
                     } catch (_) {}
+                }
+
+                // Paso 2: Si aún supera 500 MB, solo descartar noches si hay MÁS de 7 noches completas
+                const nightRecs = list.filter(r => !r.isCloud && (r.isNightSession || (r.filename && r.filename.startsWith('noche_'))));
+                if (nightRecs.length > 7 && totalBytes > maxBytes) {
+                    nightRecs.sort((a, b) => (a.modTime || 0) - (b.modTime || 0));
+                    while (nightRecs.length > 7 && totalBytes > maxBytes) {
+                        const oldestNight = nightRecs.shift();
+                        try {
+                            await FileSystem.deleteAsync(oldestNight.uri, { idempotent: true });
+                            totalBytes -= oldestNight.sizeBytes;
+                            delete metaIndex[oldestNight.filename];
+                        } catch (_) {}
+                    }
                 }
                 await saveMetadataIndex(metaIndex);
             }
