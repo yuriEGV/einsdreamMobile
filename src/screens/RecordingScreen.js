@@ -229,11 +229,11 @@ export default function RecordingScreen({ token, onLogout }) {
     const [posMs, setPosMs] = useState(0);
     const [durMs, setDurMs] = useState(0);
 
-    // Subidas a la Nube
-    const [uploadingId, setUploadingId] = useState(null);
-    const [uploadedIds, setUploadedIds] = useState(new Set());
-    const [isSyncingAll, setIsSyncingAll] = useState(false);
-    const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0 });
+    // Sincronización de Estadísticas con el Sistema Web
+    const [isSyncingStats, setIsSyncingStats] = useState(false);
+
+    // Pausa de Privacidad
+    const [isRecordingPaused, setIsRecordingPaused] = useState(false);
 
     // ─── Estado del Motor Einsdream & Predicción ──────────────────────────────
     const [sleepProfile, setSleepProfile] = useState({
@@ -269,6 +269,9 @@ export default function RecordingScreen({ token, onLogout }) {
     const testRecRef = useRef(null);
     const soundRef = useRef(null);
     const dbSamplesRef = useRef([]);
+    const pauseStartTimestampRef = useRef(null); // timestamp cuando inicia pausa de privacidad
+    const totalPausedMsRef = useRef(0);          // ms acumulados en pausa (no cuentan como noche)
+    const pauseSegmentsRef = useRef([]);        // segmentos de pausas de privacidad [{ pausedAt, resumedAt, durationMs }]
 
     // ─── Inicialización ───────────────────────────────────────────────────────
     useEffect(() => {
@@ -691,6 +694,24 @@ export default function RecordingScreen({ token, onLogout }) {
     };
 
     // Seek to a specific position in the current track
+        // Reproduce localmente en el celular al tocar una marca de evento (EinsDream 3.0)
+    const playEventAtTime = async (offsetMs, rec) => {
+        try {
+            if (rec && (playingUri !== rec.id && playingUri !== rec.uri)) {
+                await handlePlayPause(rec);
+            }
+            if (soundRef.current) {
+                const targetMs = Math.max(0, Math.round(offsetMs));
+                await soundRef.current.setPositionAsync(targetMs);
+                await soundRef.current.playAsync();
+                setPlaying(true);
+                setPosMs(targetMs);
+            }
+        } catch (err) {
+            console.warn('[playEventAtTime]', err.message);
+        }
+    };
+
     const handleSeek = async (pct) => {
         if (!soundRef.current || !durMs) return;
         try {
@@ -736,157 +757,6 @@ export default function RecordingScreen({ token, onLogout }) {
         ]);
     };
 
-    // ─── Subida de Audio a la Nube ────────────────────────────────────────────
-    const uploadToCloud = async (rec) => {
-        try {
-            if (!rec.uri || rec.isCloud) return true;
-
-            const initRes = await axios.post(
-                `${API_URL}/upload/init`,
-                { filename: rec.filename, contentType: 'audio/m4a' },
-                { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
-            );
-
-            const { url, fileKey, provider } = initRes.data;
-
-            const detectedAtIso = rec.timestamp
-                ? new Date(rec.timestamp).toISOString()
-                : (rec.modTime ? new Date(rec.modTime).toISOString() : new Date().toISOString());
-
-            const sessionDate = rec.sessionDate || detectedAtIso.slice(0, 10);
-
-            // ── Large night recording: metadata-only (no base64) ──────────────────
-            // Vercel body limit is 4.5 MB; night audio files are 50-150 MB.
-            // We sync only event markers so the dashboard can display the timeline.
-            if (rec.isLargeFile || rec.isNightSession) {
-                const metaPayload = {
-                    storageKey: fileKey,
-                    s3Key: fileKey,
-                    duration: rec.durationSecs || Math.round((rec.durationMs || 0) / 1000),
-                    deviceModel: Platform.OS === 'android' ? 'Android Native' : 'iOS Native',
-                    eventType: rec.eventType || 'night_session',
-                    confidence: rec.confidence || 100,
-                    intensityDb: rec.intensityDb || 55,
-                    detectedAt: detectedAtIso,
-                    sessionGroup: `night_${sessionDate}`,
-                    isLargeFile: true,
-                    isNightSession: true,
-                    sessionDate,
-                    durationMs: rec.durationMs || 0,
-                    eventsCount: rec.eventsCount || 0,
-                    soundEvents: rec.soundEvents || [],
-                };
-                await axios.post(
-                    `${API_URL}/upload/metadata`,
-                    metaPayload,
-                    { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
-                );
-                return true;
-            }
-
-            // ── Small clip (< 3 MB): include base64 audio ────────────────────────
-            const b64 = await FileSystem.readAsStringAsync(rec.uri, {
-                encoding: FileSystem.EncodingType.Base64,
-            });
-            const audioBase64 = `data:audio/m4a;base64,${b64}`;
-
-            const metaPayload = {
-                storageKey: fileKey,
-                s3Key: fileKey,
-                audioBase64,
-                duration: rec.durationSecs || (rec.sizeKb > 0 ? Math.round(rec.sizeKb / 12) : 20),
-                deviceModel: Platform.OS === 'android' ? 'Android Native' : 'iOS Native',
-                eventType: rec.eventType || 'auto-agent',
-                confidence: rec.confidence || 85,
-                intensityDb: rec.intensityDb || 55,
-                detectedAt: detectedAtIso,
-                sessionGroup: `night_${sessionDate}`,
-                sessionDate,
-            };
-
-            if (provider === 'local') {
-                await axios.post(
-                    `${API_URL}/upload/metadata`,
-                    metaPayload,
-                    { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
-                );
-            } else {
-                const endpoint = url.startsWith('http') ? url : `${FULL_BASE_URL}${url}`;
-                await fetch(endpoint, {
-                    method: initRes.data.uploadMethod || 'PUT',
-                    headers: { 'Content-Type': 'audio/m4a' },
-                    body: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)),
-                });
-                await axios.post(
-                    `${API_URL}/upload/metadata`,
-                    metaPayload,
-                    { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 }
-                );
-            }
-
-            return true;
-        } catch (err) {
-            console.warn(`[uploadToCloud] ${rec.filename}:`, err.message);
-            return false;
-        }
-    };
-
-
-
-    const handleManualUpload = async (rec) => {
-        if (rec.isCloud || uploadedIds.has(rec.filename) || uploadedIds.has(rec.id)) {
-            Alert.alert('✅ Ya sincronizado', 'Esta grabación ya está guardada en la nube.');
-            return;
-        }
-        if (uploadingId === rec.id) return;
-        setUploadingId(rec.id);
-        const ok = await uploadToCloud(rec);
-        setUploadingId(null);
-        if (ok) {
-            setUploadedIds((prev) => new Set([...prev, rec.filename, rec.id]));
-            Alert.alert('✅ Subido a la nube', `${rec.label} está sincronizado.`);
-            await refreshRecordings();
-        } else {
-            Alert.alert('Error de subida', 'No se pudo subir. Comprueba la conexión a internet.');
-        }
-    };
-
-    // Sincronizar todas las grabaciones locales pendientes con la nube en lote
-    const syncAllPendingRecordings = async () => {
-        if (isSyncingAll) return;
-        const pending = localRecordings.filter(
-            (r) => !r.isCloud && !uploadedIds.has(r.filename) && !uploadedIds.has(r.id)
-        );
-        if (pending.length === 0) {
-            Alert.alert('✅ Todo Sincronizado', 'Todas tus grabaciones locales ya están subidas en la nube.');
-            return;
-        }
-
-        setIsSyncingAll(true);
-        setSyncProgress({ done: 0, total: pending.length });
-        let successCount = 0;
-
-        for (let i = 0; i < pending.length; i++) {
-            const rec = pending[i];
-            setUploadingId(rec.id);
-            const ok = await uploadToCloud(rec);
-            if (ok) {
-                successCount++;
-                setUploadedIds((prev) => new Set([...prev, rec.filename, rec.id]));
-            }
-            setSyncProgress({ done: i + 1, total: pending.length });
-        }
-
-        setUploadingId(null);
-        setIsSyncingAll(false);
-        await refreshRecordings();
-
-        Alert.alert(
-            'Sincronización Completada',
-            `Se han sincronizado ${successCount} de ${pending.length} grabaciones con la nube exitosamente.`
-        );
-    };
-
     // ─── MONITOREO INTELIGENTE ────────────────────────────────────────────────
     const toggleSmartMonitoring = async () => {
         if (monitorActiveRef.current) {
@@ -911,9 +781,13 @@ export default function RecordingScreen({ token, onLogout }) {
         capturingRef.current = false;
         monitorActiveRef.current = true;
         monitorStartTimestampRef.current = Date.now();
+        totalPausedMsRef.current = 0;
+        pauseStartTimestampRef.current = null;
+        pauseSegmentsRef.current = [];
 
         setIsMonitoring(true);
         setIsCapturing(false);
+        setIsRecordingPaused(false);
         setMonitorSeconds(0);
         setCurrentDb(-160);
         setNightStats({ snore: 0, breathing: 0, cough: 0, voice: 0, movement: 0, unknown: 0, totalEvents: 0 });
@@ -939,10 +813,29 @@ export default function RecordingScreen({ token, onLogout }) {
             monitorTimerRef.current = null;
         }
 
+        // Finalizar pausa si estaba activa al detener
+        if (pauseStartTimestampRef.current) {
+            const pStart = pauseStartTimestampRef.current;
+            totalPausedMsRef.current += Date.now() - pStart;
+            pauseStartTimestampRef.current = null;
+            if (pauseSegmentsRef.current.length > 0) {
+                const last = pauseSegmentsRef.current[pauseSegmentsRef.current.length - 1];
+                if (!last.resumedAt) {
+                    last.resumedAt = new Date().toISOString();
+                    last.durationMs = Date.now() - new Date(last.pausedAt).getTime();
+                }
+            }
+        }
+        setIsRecordingPaused(false);
+        const capturedPauseSegments = [...pauseSegmentsRef.current];
+        pauseSegmentsRef.current = [];
+
         // Capture exact timing BEFORE clearing refs
         const endTimeMs = Date.now();
         const startTimeMs = monitorStartTimestampRef.current || (endTimeMs - Math.max(60, monitorSeconds) * 1000);
+        const totalPausedMs = totalPausedMsRef.current || 0;
         monitorStartTimestampRef.current = null;
+        totalPausedMsRef.current = 0;
 
         // Snapshot event markers NOW (solves stale-state bug: previously eventsCount was always 0)
         const capturedEvents = [...nightEventsRef.current];
@@ -950,7 +843,9 @@ export default function RecordingScreen({ token, onLogout }) {
 
         const start = new Date(startTimeMs);
         const end   = new Date(endTimeMs);
-        const elapsedMinutes = Math.max(1, Math.round((endTimeMs - startTimeMs) / 60000));
+        // Descontar el tiempo en pausa: la noche solo cuenta el tiempo con micrófono activo
+        const effectiveDurationMs = Math.max(60000, endTimeMs - startTimeMs - totalPausedMs);
+        const elapsedMinutes = Math.max(1, Math.round(effectiveDurationMs / 60000));
         const sessionDateStr  = start.toISOString().slice(0, 10);
 
         // ── 1. Save the continuous night recording to a permanent file ──────────
@@ -976,10 +871,11 @@ export default function RecordingScreen({ token, onLogout }) {
                         label: nightLabel,
                         eventType: 'night_session',
                         soundEvents: capturedEvents,
+                        pauseSegments: capturedPauseSegments,
                         sessionDate: sessionDateStr,
                         startTimestamp: startTimeMs,
                         endTimestamp: endTimeMs,
-                        durationMs: endTimeMs - startTimeMs,
+                        durationMs: effectiveDurationMs,
                         eventsCount: capturedEvents.length,
                         confidence: 100,
                         intensityDb: 55,
@@ -987,27 +883,6 @@ export default function RecordingScreen({ token, onLogout }) {
                         isNightSession: true,
                     };
                     await saveMetadataIndex(metaIndex);
-
-                    // Upload metadata-only (no base64 for large night files)
-                    if (token) {
-                        const info = await FileSystem.getInfoAsync(destUri, { size: true });
-                        const sizeKb = info.size ? Math.round(info.size / 1024) : 0;
-                        uploadToCloud({
-                            id: filename, filename, uri: destUri,
-                            eventType: 'night_session',
-                            confidence: 100, intensityDb: 55,
-                            durationSecs: Math.round((endTimeMs - startTimeMs) / 1000),
-                            durationMs: endTimeMs - startTimeMs,
-                            soundEvents: capturedEvents,
-                            sessionDate: sessionDateStr,
-                            eventsCount: capturedEvents.length,
-                            isNightSession: true,
-                            isLargeFile: sizeKb > 3000, // skip base64 for files > 3 MB
-                            timestamp: startTimeMs,
-                        }).then((ok) => {
-                            if (ok) setUploadedIds((prev) => new Set([...prev, filename]));
-                        });
-                    }
                 }
             } catch (err) {
                 console.warn('[stopSmartMonitoring save night rec]', err.message);
@@ -1044,6 +919,7 @@ export default function RecordingScreen({ token, onLogout }) {
             correlated.soundEvents   = capturedEvents;
             correlated.eventsCount   = capturedEvents.length;
             correlated.sessionDate   = sessionDateStr;
+            correlated.pauseSegments = capturedPauseSegments;
 
             setNightAnalysis(correlated);
             await saveSessionToCache(correlated);
@@ -1266,6 +1142,148 @@ export default function RecordingScreen({ token, onLogout }) {
         setIsTesting(false);
     };
 
+    // ─── Pausa de Privacidad ──────────────────────────────────────────────────
+    // Pausa el micrófono sin terminar la sesión nocturna ni cambiar la fecha.
+    // El timer también se pausa para que el tiempo privado NO cuente en la noche.
+    const pausePrivacyRecording = async () => {
+        if (!monitorActiveRef.current || isRecordingPaused) return;
+
+        // Detener timer (no acumula segundos durante la pausa)
+        if (monitorTimerRef.current) {
+            clearInterval(monitorTimerRef.current);
+            monitorTimerRef.current = null;
+        }
+        pauseStartTimestampRef.current = Date.now();
+        pauseSegmentsRef.current.push({
+            pausedAt: new Date(pauseStartTimestampRef.current).toISOString(),
+            resumedAt: null,
+            durationMs: 0
+        });
+
+        // Silenciar el micrófono
+        if (listenerRecRef.current) {
+            try { await listenerRecRef.current.stopAndUnloadAsync(); } catch (_) {}
+            listenerRecRef.current = null;
+        }
+
+        setIsRecordingPaused(true);
+        setCurrentDb(-160);
+        setIsCapturing(false);
+    };
+
+    // Reanuda el micrófono y el timer tras una pausa de privacidad.
+    const resumePrivacyRecording = async () => {
+        if (!monitorActiveRef.current || !isRecordingPaused) return;
+
+        // Acumular tiempo pausado para descuento al finalizar
+        if (pauseStartTimestampRef.current) {
+            totalPausedMsRef.current += Date.now() - pauseStartTimestampRef.current;
+            pauseStartTimestampRef.current = null;
+        }
+
+        if (pauseSegmentsRef.current.length > 0) {
+            const last = pauseSegmentsRef.current[pauseSegmentsRef.current.length - 1];
+            if (!last.resumedAt) {
+                last.resumedAt = new Date().toISOString();
+                last.durationMs = Date.now() - new Date(last.pausedAt).getTime();
+            }
+        }
+
+        setIsRecordingPaused(false);
+
+        // Reiniciar timer del contador de noche
+        monitorTimerRef.current = setInterval(() => {
+            setMonitorSeconds((s) => s + 1);
+        }, 1000);
+
+        // Reiniciar grabación de micrófono (nuevo segmento, misma sesión)
+        await startNightRecording();
+    };
+
+    // ─── Sincronizar Solo Estadísticas con el Sistema Web ─────────────────────
+    // Envía únicamente los datos de análisis (night-sessions) al backend.
+    // NO sube archivos de audio.
+    const syncStatsToServer = async () => {
+        if (isSyncingStats) return;
+        if (!token) {
+            Alert.alert('Sin sesión', 'Inicia sesión para sincronizar con el sistema web.');
+            return;
+        }
+        setIsSyncingStats(true);
+        try {
+            const sessions = await loadCachedSessions();
+            const toSync = nightAnalysis
+                ? [nightAnalysis, ...sessions.filter(s => s.sessionDate !== nightAnalysis?.sessionDate)]
+                : sessions;
+
+            if (toSync.length === 0) {
+                Alert.alert('Sin datos', 'No hay noches registradas para sincronizar.');
+                setIsSyncingStats(false);
+                return;
+            }
+
+            let successCount = 0;
+            for (const session of toSync.slice(0, 10)) {
+                try {
+                    // Formato EinsDream 3.0: Solo Telemetría JSON (< 20 KB), CERO audio a la nube
+                    const soundEvts = (session.soundEvents || session.correlatedEvents || []).map(e => ({
+                        offsetMs: e.offsetMs !== undefined ? e.offsetMs : (e.relativeMs !== undefined ? e.relativeMs : 0),
+                        timeLabel: e.timeLabel || '',
+                        type: e.type || e.eventType || 'snore',
+                        eventType: e.eventType || e.type || 'snore',
+                        peakDb: e.peakDb !== undefined ? e.peakDb : -Math.abs(e.intensityDb || 25),
+                        intensityDb: e.intensityDb || Math.abs(e.peakDb || 55),
+                        duration: e.duration || 5
+                    }));
+
+                    const pauseInts = (session.pauseIntervals || session.pauseSegments || []).map(p => ({
+                        startMs: p.startMs !== undefined ? p.startMs : (p.pausedAt ? new Date(p.pausedAt).getTime() - new Date(session.startTime).getTime() : 0),
+                        endMs: p.endMs !== undefined ? p.endMs : (p.resumedAt ? new Date(p.resumedAt).getTime() - new Date(session.startTime).getTime() : (p.durationMs || 0)),
+                        durationMs: p.durationMs || 0
+                    }));
+
+                    const payload = {
+                        sessionId: session.sessionId || `night_${(session.sessionDate || 'session').replace(/-/g, '_')}`,
+                        sessionDate: session.sessionDate,
+                        startTime: session.startTime,
+                        endTime: session.endTime,
+                        totalDurationMs: session.totalDurationMs || (session.sleepSummary?.durationMinutes ? session.sleepSummary.durationMinutes * 60000 : 0),
+                        pauseIntervals: pauseInts,
+                        soundEvents: soundEvts,
+                        summary: {
+                            snoreCount: session.summary?.snoreCount ?? soundEvts.filter(e => e.eventType === 'snore').length,
+                            coughCount: session.summary?.coughCount ?? soundEvts.filter(e => e.eventType === 'cough').length,
+                            totalPausedMinutes: session.summary?.totalPausedMinutes ?? Math.round(pauseInts.reduce((acc, p) => acc + ((p.durationMs || (p.endMs - p.startMs)) / 60000), 0))
+                        },
+                        einsdreamScore: session.einsdreamScore,
+                        dimensions: session.dimensions,
+                        sleepSummary: session.sleepSummary,
+                        cardiovascular: session.cardiovascular,
+                        snoreMetrics: session.snoreMetrics
+                    };
+
+                    await axios.post(`${API_URL}/night-sessions`, payload, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        timeout: 12000,
+                    });
+                    successCount++;
+                } catch (err) {
+                    console.warn('[syncStatsToServer night error]', err.message);
+                }
+            }
+
+            Alert.alert(
+                '✅ Sincronizado con Sistema Web',
+                `${successCount} de ${Math.min(toSync.length, 10)} noches enviadas al dashboard (EinsDream 3.0 JSON Telemetría).
+El sistema web ya puede procesar tus estadísticas.`
+            );
+        } catch (e) {
+            Alert.alert('Error de sincronización', 'Verifica tu conexión a internet.');
+        } finally {
+            setIsSyncingStats(false);
+        }
+    };
+
     // ─── Renderizado de Pestañas ──────────────────────────────────────────────
     return (
         <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
@@ -1273,7 +1291,7 @@ export default function RecordingScreen({ token, onLogout }) {
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.4.0 (Estable)</Text>
+                    <Text style={s.versionText}>v2.6.0 (Estable)</Text>
                 </View>
             </View>
 
@@ -1337,27 +1355,36 @@ export default function RecordingScreen({ token, onLogout }) {
 
                     {/* Banner de Monitoreo Activo */}
                     {isMonitoring && (
-                        <View style={[s.banner, isCapturing ? s.bannerCapturing : s.bannerListening]}>
+                        <View style={[
+                            s.banner,
+                            isRecordingPaused ? s.bannerPaused : (isCapturing ? s.bannerCapturing : s.bannerListening)
+                        ]}>
                             <Text style={s.bannerTitle}>
-                                {isCapturing ? '🔴 ¡EVENTO SONORO DETECTADO!' : '🟢 ESCUCHANDO EN SILENCIO'}
+                                {isRecordingPaused
+                                    ? '🔒 PRIVACIDAD ACTIVA — MICRÓFONO PAUSADO'
+                                    : (isCapturing ? '🔴 ¡EVENTO SONORO DETECTADO!' : '🟢 ESCUCHANDO EN SILENCIO')}
                             </Text>
                             <Text style={s.bannerSub}>
-                                {isCapturing
-                                    ? 'Analizando con IA local y guardando evento...'
-                                    : `Sensor activo (${currentDb} dB) · Tiempo: ${fmtTime(monitorSeconds)}`}
+                                {isRecordingPaused
+                                    ? 'La grabación está pausada. La sesión nocturna continúa sin registrar audio.'
+                                    : (isCapturing
+                                        ? 'Analizando con IA local y guardando evento...'
+                                        : `Sensor activo (${currentDb} dB) · Tiempo: ${fmtTime(monitorSeconds)}`)}
                             </Text>
 
-                            <View style={s.meterBarContainer}>
-                                <View
-                                    style={[
-                                        s.meterBarFill,
-                                        {
-                                            width: `${Math.max(5, Math.min(100, (currentDb + 80) * 1.6))}%`,
-                                            backgroundColor: isCapturing ? '#ef4444' : '#10b981',
-                                        },
-                                    ]}
-                                />
-                            </View>
+                            {!isRecordingPaused && (
+                                <View style={s.meterBarContainer}>
+                                    <View
+                                        style={[
+                                            s.meterBarFill,
+                                            {
+                                                width: `${Math.max(5, Math.min(100, (currentDb + 80) * 1.6))}%`,
+                                                backgroundColor: isCapturing ? '#ef4444' : '#10b981',
+                                            },
+                                        ]}
+                                    />
+                                </View>
+                            )}
 
                             <View style={s.statsGrid}>
                                 <Text style={s.statBadge}>😴 Ronquidos: {nightStats.snore}</Text>
@@ -1396,6 +1423,28 @@ export default function RecordingScreen({ token, onLogout }) {
                         </Text>
                     </TouchableOpacity>
 
+                    {/* Botón de Pausa de Privacidad — solo visible durante monitoreo activo */}
+                    {isMonitoring && (
+                        <TouchableOpacity
+                            style={[s.pausePrivacyBtn, isRecordingPaused && s.pausePrivacyBtnActive]}
+                            onPress={isRecordingPaused ? resumePrivacyRecording : pausePrivacyRecording}
+                        >
+                            <Text style={s.pausePrivacyIcon}>
+                                {isRecordingPaused ? '🎙️' : '🔒'}
+                            </Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={s.pausePrivacyText}>
+                                    {isRecordingPaused ? '▶ Reanudar Grabación' : '⏸ Pausa de Privacidad'}
+                                </Text>
+                                <Text style={s.pausePrivacySub}>
+                                    {isRecordingPaused
+                                        ? 'Reactivar micrófono · La noche sigue sin cambio de fecha'
+                                        : 'Silenciar micrófono sin terminar la pernoctación'}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    )}
+
                     {/* Botón de Prueba de Micrófono */}
                     <TouchableOpacity
                         style={[s.testBtn, (isTesting || isMonitoring) && { opacity: 0.6 }]}
@@ -1420,17 +1469,30 @@ export default function RecordingScreen({ token, onLogout }) {
                         <ActivityIndicator size="large" color="#38bdf8" style={{ marginVertical: 30 }} />
                     ) : nightAnalysis ? (
                         <View>
-                            {/* Fecha y Refresh */}
+                            {/* Fecha y Refresh + Sincronizar */}
                             <View style={s.scoreHeaderRow}>
                                 <Text style={s.scoreDateText}>
                                     Noche de {nightAnalysis.sessionDate || 'Hoy'}
                                 </Text>
-                                <TouchableOpacity
-                                    style={s.recalcBtn}
-                                    onPress={() => reloadTrendsAndPredictions(sleepProfile)}
-                                >
-                                    <Text style={s.recalcBtnText}>🔄 Actualizar</Text>
-                                </TouchableOpacity>
+                                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                                    <TouchableOpacity
+                                        style={s.recalcBtn}
+                                        onPress={() => reloadTrendsAndPredictions(sleepProfile)}
+                                    >
+                                        <Text style={s.recalcBtnText}>🔄 Actualizar</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[s.recalcBtn, { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]}
+                                        onPress={syncStatsToServer}
+                                        disabled={isSyncingStats}
+                                    >
+                                        {isSyncingStats ? (
+                                            <ActivityIndicator size="small" color="#93c5fd" />
+                                        ) : (
+                                            <Text style={[s.recalcBtnText, { color: '#93c5fd' }]}>☁ Sincronizar</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
                             </View>
 
                             {/* Tarjeta de los 3 Pilares con Einsdream Score */}
@@ -1722,31 +1784,6 @@ export default function RecordingScreen({ token, onLogout }) {
                             </Text>
                         </View>
 
-                        {/* Sync button */}
-                        {(() => {
-                            const pendingCount = localRecordings.filter(
-                                (r) => !r.isCloud && !uploadedIds.has(r.filename) && !uploadedIds.has(r.id)
-                            ).length;
-                            if (pendingCount === 0) return null;
-                            return (
-                                <TouchableOpacity
-                                    style={[s.syncAllBtn, isSyncingAll && { opacity: 0.7 }]}
-                                    onPress={syncAllPendingRecordings}
-                                    disabled={isSyncingAll}
-                                >
-                                    {isSyncingAll ? (
-                                        <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
-                                    ) : (
-                                        <Text style={{ fontSize: 13, marginRight: 6 }}>☁️</Text>
-                                    )}
-                                    <Text style={s.syncAllBtnText}>
-                                        {isSyncingAll
-                                            ? `Sincronizando (${syncProgress.done}/${syncProgress.total})...`
-                                            : `Sincronizar metadatos (${pendingCount} pendientes)`}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })()}
 
                         {loadingRecs ? (
                             <ActivityIndicator size="large" color="#38bdf8" style={{ marginVertical: 24 }} />
@@ -1772,8 +1809,6 @@ export default function RecordingScreen({ token, onLogout }) {
                                     {grouped[section].map((rec) => {
                                         const isSelected = playingUri === rec.id || playingUri === rec.uri;
                                         const isThisPlaying = isSelected && playing;
-                                        const isUploaded = rec.isCloud || rec.isUploaded || uploadedIds.has(rec.filename) || uploadedIds.has(rec.id);
-                                        const isUploading = uploadingId === rec.id;
                                         const progress = isSelected && durMs > 0 ? posMs / durMs : 0;
                                         const events = rec.soundEvents || [];
                                         const nightDurationMs = (isSelected && durMs > 0) ? durMs : (rec.durationMs || 0);
@@ -1786,74 +1821,78 @@ export default function RecordingScreen({ token, onLogout }) {
                                                     <Text style={s.recMeta}>
                                                         {rec.dateStr} · {rec.sizeKb >= 1024 ? `${(rec.sizeKb / 1024).toFixed(1)} MB` : `${rec.sizeKb} KB`}
                                                         {rec.isNightSession ? ` · ${events.length} evento${events.length !== 1 ? 's' : ''}` : ''}
-                                                        {isUploaded ? ' · ☁️ Sincronizado' : ' · ⏳ Local'}
                                                     </Text>
 
-                                                    {/* ─── Night Timeline Bar ──────────── */}
+                                                    {/* ─── Night Timeline Bar ────────────── */}
                                                     {rec.isNightSession && nightDurationMs > 0 && (
                                                         <View style={{ marginTop: 8 }}>
-                                                            <Text style={{ color: '#64748b', fontSize: 9, marginBottom: 3, fontWeight: '700' }}>
-                                                                LÍNEA DE TIEMPO NOCTURNA · {fmtMs(isSelected ? posMs : 0)} / {fmtMs(nightDurationMs)}
+                                                            <Text style={{ color: '#64748b', fontSize: 9, marginBottom: 4, fontWeight: '700', letterSpacing: 0.5 }}>
+                                                                LÍNEA DE TIEMPO · {fmtMs(isSelected ? posMs : 0)} / {fmtMs(nightDurationMs)}
                                                             </Text>
-                                                            <View
-                                                                style={{ height: 44, backgroundColor: '#0f172a', borderRadius: 8, overflow: 'visible', position: 'relative' }}
-                                                                onLayout={() => {}}
-                                                            >
-                                                                {/* Seek target (full bar) */}
-                                                                <TouchableOpacity
-                                                                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 8, overflow: 'hidden' }}
-                                                                    activeOpacity={0.9}
-                                                                    onPress={(e) => {
-                                                                        if (!isSelected) handlePlayPause(rec);
-                                                                        // Rough seek via locationX — layout width not directly available here
-                                                                    }}
-                                                                >
-                                                                    {/* Progress fill */}
-                                                                    {isSelected && durMs > 0 && (
-                                                                        <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(100, progress * 100)}%`, backgroundColor: 'rgba(56,189,248,0.18)', borderRadius: 8 }} />
-                                                                    )}
-                                                                </TouchableOpacity>
 
-                                                                {/* Event dots */}
+                                                            {/* Barra principal de la timeline */}
+                                                            <View style={s.timelineBar}>
+                                                                {/* Relleno de progreso */}
+                                                                {isSelected && durMs > 0 && (
+                                                                    <View style={[
+                                                                        s.timelineProgress,
+                                                                        { width: `${Math.min(100, progress * 100)}%` }
+                                                                    ]} />
+                                                                )}
+
+                                                                {/* Área de toque para seek */}
+                                                                <TouchableOpacity
+                                                                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                                                                    activeOpacity={0.85}
+                                                                    onPress={(e) => {
+                                                                        if (!isSelected) { handlePlayPause(rec); return; }
+                                                                        const { locationX } = e.nativeEvent;
+                                                                        e.target.measure((fx, fy, w) => {
+                                                                            if (w > 0) handleSeek(Math.max(0, Math.min(1, locationX / w)));
+                                                                        });
+                                                                    }}
+                                                                />
+
+                                                                {/* Puntos de eventos — Diseño Clásico Imagen 4: puntos limpios clicables */}
                                                                 {events.map((evt, i) => {
-                                                                    const leftPct = nightDurationMs > 0 ? Math.min(95, Math.max(0, (evt.relativeMs / nightDurationMs) * 100)) : 0;
+                                                                    const leftPct = nightDurationMs > 0
+                                                                        ? Math.min(96, Math.max(2, (evt.relativeMs / nightDurationMs) * 100))
+                                                                        : 0;
+                                                                    const dotColor = evColor(evt.eventType);
                                                                     return (
                                                                         <TouchableOpacity
                                                                             key={i}
-                                                                            style={{
-                                                                                position: 'absolute',
-                                                                                left: `${leftPct}%`,
-                                                                                top: '50%',
-                                                                                marginTop: -7,
-                                                                                marginLeft: -7,
-                                                                                width: 14,
-                                                                                height: 14,
-                                                                                borderRadius: 7,
-                                                                                backgroundColor: evColor(evt.eventType),
-                                                                                borderWidth: 1.5,
-                                                                                borderColor: '#0f172a',
-                                                                                zIndex: 20,
-                                                                            }}
-                                                                            onPress={() => {
-                                                                                if (!isSelected) {
-                                                                                    handlePlayPause(rec);
-                                                                                } else {
-                                                                                    handleSeek(evt.relativeMs / nightDurationMs);
+                                                                            activeOpacity={0.8}
+                                                                            style={[
+                                                                                s.timelineDot,
+                                                                                {
+                                                                                    left: `${leftPct}%`,
+                                                                                    backgroundColor: dotColor,
+                                                                                    shadowColor: dotColor,
+                                                                                    shadowOpacity: 0.8,
+                                                                                    shadowRadius: 4,
+                                                                                    elevation: 4,
                                                                                 }
+                                                                            ]}
+                                                                            onPress={() => {
+                                                                                playEventAtTime(evt.relativeMs, rec);
                                                                             }}
                                                                         />
                                                                     );
                                                                 })}
 
-                                                                {/* Playhead */}
+                                                                {/* Cabezal de reproducción */}
                                                                 {isSelected && durMs > 0 && (
-                                                                    <View style={{ position: 'absolute', top: 0, bottom: 0, left: `${Math.min(99, progress * 100)}%`, width: 2, backgroundColor: '#38bdf8', zIndex: 5 }} />
+                                                                    <View style={[
+                                                                        s.timelinePlayhead,
+                                                                        { left: `${Math.min(99, progress * 100)}%` }
+                                                                    ]} />
                                                                 )}
                                                             </View>
 
-                                                            {/* Legend */}
+                                                            {/* Leyenda de tipos */}
                                                             {events.length > 0 && (
-                                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 8 }}>
+                                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 5, gap: 8 }}>
                                                                     {[...new Set(events.map(e => e.eventType))].map(type => (
                                                                         <View key={type} style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                                                                             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: evColor(type) }} />
@@ -1863,6 +1902,42 @@ export default function RecordingScreen({ token, onLogout }) {
                                                                             </Text>
                                                                         </View>
                                                                     ))}
+                                                                </View>
+                                                            )}
+
+                                                            {/* Referencia pequeña y limpia de eventos acústicos (EinsDream 3.0) */}
+                                                            {events.length > 0 && (
+                                                                <View style={{ marginTop: 8, gap: 4 }}>
+                                                                    {events.slice(0, 8).map((evt, i) => {
+                                                                        const timeStr = evt.timeLabel || fmtMs(evt.relativeMs);
+                                                                        const typeLabel = evt.eventType === 'snore' ? 'Ronquido' : evt.eventType === 'cough' ? 'Tos' : evt.eventType === 'voice' ? 'Voz' : evt.eventType === 'breathing' ? 'Respiración' : evt.eventType;
+                                                                        return (
+                                                                            <TouchableOpacity
+                                                                                key={i}
+                                                                                activeOpacity={0.7}
+                                                                                onPress={() => playEventAtTime(evt.relativeMs, rec)}
+                                                                                style={{
+                                                                                    flexDirection: 'row',
+                                                                                    alignItems: 'center',
+                                                                                    justifyContent: 'space-between',
+                                                                                    paddingVertical: 5,
+                                                                                    paddingHorizontal: 8,
+                                                                                    borderRadius: 6,
+                                                                                    backgroundColor: 'rgba(255,255,255,0.03)',
+                                                                                    borderWidth: 1,
+                                                                                    borderColor: 'rgba(255,255,255,0.05)'
+                                                                                }}
+                                                                            >
+                                                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                                                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: evColor(evt.eventType) }} />
+                                                                                    <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>{timeStr}</Text>
+                                                                                    <Text style={{ color: '#64748b', fontSize: 11 }}>—</Text>
+                                                                                    <Text style={{ color: evColor(evt.eventType), fontSize: 11, fontWeight: '600' }}>{typeLabel}</Text>
+                                                                                </View>
+                                                                                <Text style={{ color: '#38bdf8', fontSize: 10, fontWeight: '700' }}>▶ Reproducir</Text>
+                                                                            </TouchableOpacity>
+                                                                        );
+                                                                    })}
                                                                 </View>
                                                             )}
                                                         </View>
@@ -1885,12 +1960,18 @@ export default function RecordingScreen({ token, onLogout }) {
                                                                 <View style={{ flex: Math.max(0.001, 1 - progress) }} />
                                                             </TouchableOpacity>
                                                             <View style={s.playerRow}>
-                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(-10)}>
-                                                                    <Text style={s.skipBtnText}>⏪ 10s</Text>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(-60)}>
+                                                                    <Text style={s.skipBtnText}>⏮ 1min</Text>
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(-30)}>
+                                                                    <Text style={s.skipBtnText}>⏪ 30s</Text>
                                                                 </TouchableOpacity>
                                                                 <Text style={s.timeText}>{fmtMs(posMs)} / {fmtMs(durMs)}</Text>
-                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(10)}>
-                                                                    <Text style={s.skipBtnText}>10s ⏩</Text>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(30)}>
+                                                                    <Text style={s.skipBtnText}>30s ⏩</Text>
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity style={s.skipBtn} onPress={() => handleSkip(60)}>
+                                                                    <Text style={s.skipBtnText}>1min ⏭</Text>
                                                                 </TouchableOpacity>
                                                             </View>
                                                         </View>
@@ -1903,19 +1984,6 @@ export default function RecordingScreen({ token, onLogout }) {
                                                     onPress={() => handlePlayPause(rec)}
                                                 >
                                                     <Text style={s.iconBtnText}>{isThisPlaying ? '⏸' : '▶'}</Text>
-                                                </TouchableOpacity>
-
-                                                {/* Sync to cloud */}
-                                                <TouchableOpacity
-                                                    style={[s.iconBtn, { backgroundColor: isUploaded ? '#7c3aed' : '#2563eb', marginLeft: 6 }]}
-                                                    onPress={() => handleManualUpload(rec)}
-                                                    disabled={isUploading}
-                                                >
-                                                    {isUploading ? (
-                                                        <ActivityIndicator size="small" color="#fff" />
-                                                    ) : (
-                                                        <Text style={s.iconBtnText}>{isUploaded ? '✓' : '☁'}</Text>
-                                                    )}
                                                 </TouchableOpacity>
 
                                                 {/* Delete */}
@@ -2061,6 +2129,10 @@ const s = StyleSheet.create({
         borderColor: '#ef4444',
         backgroundColor: '#450a0a',
     },
+    bannerPaused: {
+        borderColor: '#f59e0b',
+        backgroundColor: '#451a03',
+    },
     bannerTitle: {
         fontWeight: '800',
         fontSize: 14,
@@ -2146,6 +2218,36 @@ const s = StyleSheet.create({
         color: '#fbbf24',
         fontWeight: '800',
         fontSize: 13,
+    },
+
+    pausePrivacyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#1e293b',
+        borderWidth: 1.5,
+        borderColor: '#64748b',
+        borderRadius: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        marginBottom: 12,
+        gap: 12,
+    },
+    pausePrivacyBtnActive: {
+        backgroundColor: '#451a03',
+        borderColor: '#f59e0b',
+    },
+    pausePrivacyIcon: {
+        fontSize: 24,
+    },
+    pausePrivacyText: {
+        color: '#f8fafc',
+        fontWeight: '800',
+        fontSize: 14,
+    },
+    pausePrivacySub: {
+        color: '#94a3b8',
+        fontSize: 11,
+        marginTop: 2,
     },
 
     scoreHeaderRow: {
@@ -2533,6 +2635,56 @@ const s = StyleSheet.create({
         fontSize: 10,
         color: '#38bdf8',
         fontWeight: '700',
+    },
+
+    // ─── Timeline Bar & Event Navigation ──────────────────────────────────
+    timelineBar: {
+        height: 38,
+        backgroundColor: '#172033',
+        borderRadius: 12,
+        position: 'relative',
+        overflow: 'visible',
+        borderWidth: 1,
+        borderColor: '#334155',
+        marginVertical: 4,
+    },
+    timelineProgress: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(56, 189, 248, 0.22)',
+        borderRadius: 9,
+    },
+    timelineDot: {
+        position: 'absolute',
+        top: '50%',
+        marginTop: -7,
+        marginLeft: -7,
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        borderWidth: 2,
+        borderColor: '#0f172a',
+        zIndex: 20,
+    },
+    timelinePlayhead: {
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        width: 2.5,
+        backgroundColor: '#38bdf8',
+        zIndex: 15,
+    },
+    evtPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#1e293b',
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        gap: 5,
     },
 
     iconBtn: {
