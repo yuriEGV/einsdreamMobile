@@ -619,7 +619,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
                     for (const cs of cloudSessions) {
                         const cloudKey = cs.storageKey || cs.s3Key || cs.filename || `cloud_${cs._id}.m4a`;
-                        const baseName = cloudKey.split('/').pop().split('\').pop();
+                        const baseName = cloudKey.split('/').pop().split('\\').pop();
                         const rawName = baseName.replace(/^\d+_/, '');
 
                         const localMatch = list.find((r) => r.filename === baseName || r.filename === rawName || r.id === baseName || r.id === rawName);
