@@ -2168,7 +2168,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.1 (Audio Engine & Pair Dual)</Text>
+                    <Text style={s.versionText}>v2.9.5 (Audio Engine & Timeline Picos)</Text>
                 </View>
             </View>
 
@@ -2866,11 +2866,9 @@ El sistema web ya puede procesar tus estadísticas.`
                                                 marginVertical: 6
                                             }}
                                         >
-                                            <Ionicons
-                                                name={isPlayingCurrent ? 'pause' : 'play'}
-                                                size={26}
-                                                color="#ffffff"
-                                            />
+                                            <Text style={{ fontSize: 24, color: '#ffffff', marginRight: 4 }}>
+                                                {isPlayingCurrent ? '⏸' : '▶'}
+                                            </Text>
                                             <Text style={{ color: '#ffffff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 }}>
                                                 {isPlayingCurrent ? 'PAUSAR REPRODUCCIÓN' : 'REPRODUCIR AUDIO DE ESTA NOCHE'}
                                             </Text>
