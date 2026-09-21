@@ -185,6 +185,17 @@ function getEventLabel(type) {
     }
 }
 
+function evColor(type) {
+    switch (type) {
+        case 'snore': return '#F59E0B';     // Ámbar / Oro
+        case 'cough': return '#EF4444';     // Rojo
+        case 'breathing': return '#06B6D4'; // Cian
+        case 'movement': return '#8B5CF6';  // Púrpura
+        case 'voice': return '#3B82F6';     // Azul
+        default: return '#10B981';          // Esmeralda
+    }
+}
+
 // Generador de audio de contingencia y efectos acústicos (PCM 16-bit signed, 16000 Hz, mono WAV Base64)
 // Totalmente compatible con todos los decodificadores Android / MediaPlayer sin errores
 function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundType = 'ambient') {
@@ -966,7 +977,6 @@ export default function RecordingScreen({ token, onLogout }) {
                             cloudUploadedSet.add(baseName);
                         }
                     }
-                    setUploadedIds((prev) => new Set([...prev, ...cloudUploadedSet]));
                 } catch (cloudErr) {
                     console.warn('[refreshRecordings cloud sync]', cloudErr.message);
                 }
@@ -1389,7 +1399,8 @@ export default function RecordingScreen({ token, onLogout }) {
             setPosMs(targetMs);
 
             // Auto-seleccionar el evento más cercano a este punto de la noche
-            const activeNight = nightRecordings[selectedNightIndex] || nightRecordings[0];
+            const nights = localRecordings.filter(r => r.isNightSession || r.sessionDate || (r.soundEvents && r.soundEvents.length > 0));
+            const activeNight = nights[selectedNightIndex] || nights[0];
             if (activeNight && activeNight.soundEvents) {
                 const nearest = activeNight.soundEvents.find(e => {
                     const o = (e.offsetMs !== undefined && e.offsetMs !== null) ? e.offsetMs : (e.relativeMs || 0);
@@ -2642,6 +2653,10 @@ El sistema web ya puede procesar tus estadísticas.`
 
                 const isSelected = currentNight && (playingUri === currentNight.id || playingUri === currentNight.uri || (playingUri && playingUri.includes(currentNight.id)));
                 const isThisPlaying = isSelected && playing;
+                const isPlayingCurrent = isSelected && playing;
+                const score = currentNight?.einsdreamScore?.totalScore !== undefined
+                    ? currentNight.einsdreamScore.totalScore
+                    : (currentNight?.qualityScore !== undefined ? currentNight.qualityScore : undefined);
                 const nightDurationMs = (isSelected && durMs > 0) ? durMs : (currentNight?.durationMs || 21240000);
                 const progress = (isSelected && nightDurationMs > 0) ? Math.min(1, Math.max(0, posMs / nightDurationMs)) : 0;
 
