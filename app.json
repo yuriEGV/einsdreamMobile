@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "package": "cl.einsdream.mobile",
-      "versionCode": 17,,
+      "versionCode": 17,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },

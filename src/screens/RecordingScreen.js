@@ -2794,107 +2794,308 @@ El sistema web ya puede procesar tus estadísticas.`
                                     </View>
                                 )}
 
-                                {/* ══════════════════════════════════════════════════════════════════════ */}
-                                {/* 2. REPRODUCTOR PRINCIPAL DE LA NOCHE ACTIVA (SENIOR-FRIENDLY)        */}
-                                {/* ══════════════════════════════════════════════════════════════════════ */}
+                                {/* ─── 2. REPRODUCTOR PRINCIPAL DE LA NOCHE ACTIVA (SENIOR-FRIENDLY CON LÍNEA DE TIEMPO) ─── */}
                                 {currentNight && (
                                     <View style={{
                                         backgroundColor: '#0f172a',
-                                        borderRadius: 16,
+                                        borderRadius: 20,
                                         padding: 16,
                                         borderWidth: 2,
-                                        borderColor: '#38bdf8',
-                                        marginBottom: 20
+                                        borderColor: '#0284c7',
+                                        elevation: 6
                                     }}>
-                                        {/* Título y Score de la Noche */}
-                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                                            <View style={{ flex: 1, paddingRight: 8 }}>
-                                                <Text style={{ color: '#ffffff', fontSize: 17, fontWeight: '800', lineHeight: 22 }}>
-                                                    {currentNight.label}
+                                        {/* ENCABEZADO DE LA NOCHE ACTIVA */}
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                                            <View style={{ flex: 1, paddingRight: 10 }}>
+                                                <Text style={{ color: '#ffffff', fontSize: 19, fontWeight: '900', lineHeight: 24 }}>
+                                                    {currentNight.label || `Noche ${currentNight.sessionDate}`}
                                                 </Text>
-                                                <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
-                                                    ⏱️ Duración: {fmtMs(nightDurationMs)} · {currentNight.soundEvents?.length || 0} eventos acústicos registrados
+                                                <Text style={{ color: '#94a3b8', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
+                                                    ⏱ Duración: {fmtMs(nightDurationMs)} · {currentNight.eventsCount || (currentNight.soundEvents ? currentNight.soundEvents.length : 0)} eventos acústicos registrados
                                                 </Text>
                                             </View>
-                                            {currentNight.einsdreamScore?.totalScore !== undefined && (
+
+                                            {score !== undefined && (
                                                 <View style={{
-                                                    backgroundColor: currentNight.einsdreamScore.totalScore >= 85 ? '#065f46' : (currentNight.einsdreamScore.totalScore >= 70 ? '#075985' : '#78350f'),
-                                                    borderColor: currentNight.einsdreamScore.totalScore >= 85 ? '#10b981' : (currentNight.einsdreamScore.totalScore >= 70 ? '#38bdf8' : '#f59e0b'),
-                                                    borderWidth: 1.5,
-                                                    borderRadius: 10,
+                                                    paddingHorizontal: 12,
                                                     paddingVertical: 6,
-                                                    paddingHorizontal: 10,
+                                                    borderRadius: 12,
+                                                    backgroundColor: score >= 85 ? '#065f46' : (score >= 70 ? '#0369a1' : '#854d0e'),
                                                     alignItems: 'center'
                                                 }}>
-                                                    <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '900' }}>
-                                                        {currentNight.einsdreamScore.totalScore}
+                                                    <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '900' }}>
+                                                        {score}
                                                     </Text>
-                                                    <Text style={{ color: '#e0f2fe', fontSize: 9, fontWeight: '700' }}>PUNTOS</Text>
+                                                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' }}>
+                                                        Puntos
+                                                    </Text>
                                                 </View>
                                             )}
                                         </View>
 
-                                        {/* BOTÓN MASTER GIGANTE DE REPRODUCIR / PAUSAR */}
+                                        {/* BOTÓN MAESTRO DE REPRODUCCIÓN (GIGANTE PARA ADULTO MAYOR) */}
                                         <TouchableOpacity
-                                            activeOpacity={0.85}
-                                            onPress={() => handlePlayPause(currentNight, 'ambient')}
+                                            activeOpacity={0.8}
+                                            onPress={() => handlePlayPause(currentNight)}
                                             style={{
-                                                backgroundColor: isThisPlaying ? '#d97706' : '#16a34a',
+                                                backgroundColor: isPlayingCurrent ? '#d97706' : '#059669',
+                                                paddingVertical: 15,
                                                 borderRadius: 14,
-                                                paddingVertical: 14,
-                                                paddingHorizontal: 20,
-                                                flexDirection: 'row',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
-                                                gap: 12,
-                                                marginVertical: 10,
-                                                elevation: 4
+                                                flexDirection: 'row',
+                                                gap: 10,
+                                                elevation: 5,
+                                                borderWidth: 2,
+                                                borderColor: isPlayingCurrent ? '#f59e0b' : '#34d399',
+                                                marginVertical: 6
                                             }}
                                         >
-                                            <Text style={{ fontSize: 24, color: '#ffffff' }}>{isThisPlaying ? '⏸' : '▶'}</Text>
-                                            <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '800' }}>
-                                                {isThisPlaying ? 'PAUSAR REPRODUCCIÓN' : 'REPRODUCIR AUDIO DE ESTA NOCHE'}
+                                            <Ionicons
+                                                name={isPlayingCurrent ? 'pause' : 'play'}
+                                                size={26}
+                                                color="#ffffff"
+                                            />
+                                            <Text style={{ color: '#ffffff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 }}>
+                                                {isPlayingCurrent ? 'PAUSAR REPRODUCCIÓN' : 'REPRODUCIR AUDIO DE ESTA NOCHE'}
                                             </Text>
                                         </TouchableOpacity>
 
-                                        {/* LECTURA DE TIEMPO GIGANTE Y ACCESIBLE */}
-                                        <View style={{ alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
-                                            <Text style={{ color: '#38bdf8', fontSize: 20, fontWeight: '900', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                                        {/* TIEMPO TRANSCURRIDO Y TOTAL (NÚMEROS GIGANTES) */}
+                                        <View style={{ alignItems: 'center', marginTop: 6, marginBottom: 4 }}>
+                                            <Text style={{ color: '#38bdf8', fontSize: 22, fontWeight: '900', letterSpacing: 1.5, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
                                                 {fmtMs(isSelected ? posMs : 0)} / {fmtMs(nightDurationMs)}
                                             </Text>
                                         </View>
 
-                                        {/* BARRA DE PROGRESO ACCESIBLE Y CÓMODA */}
-                                        <TouchableOpacity
-                                            activeOpacity={0.85}
-                                            style={{
-                                                height: 20,
-                                                backgroundColor: '#1e293b',
-                                                borderRadius: 10,
-                                                overflow: 'hidden',
-                                                justifyContent: 'center',
-                                                marginVertical: 6,
-                                                borderWidth: 1,
-                                                borderColor: '#334155'
-                                            }}
-                                            onPress={(e) => {
-                                                if (!isSelected) { handlePlayPause(currentNight, 'ambient'); return; }
-                                                const { locationX } = e.nativeEvent;
-                                                e.target.measure((fx, fy, w) => {
-                                                    if (w > 0) handleSeek(Math.max(0, Math.min(1, locationX / w)));
-                                                });
-                                            }}
-                                        >
+                                        {/* ─── LÍNEA DE TIEMPO INTERACTIVA CON PICOS ACÚSTICOS (EVENTOS) ─── */}
+                                        <View style={{ marginVertical: 10 }}>
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                                <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                                    📈 Línea de Tiempo · Toca la barra o un pico
+                                                </Text>
+                                                <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '700' }}>
+                                                    {currentNight.soundEvents ? currentNight.soundEvents.length : 0} Picos detectados
+                                                </Text>
+                                            </View>
+
+                                            {/* Barra física de la timeline */}
                                             <View style={{
-                                                height: '100%',
-                                                backgroundColor: '#38bdf8',
-                                                width: `${Math.min(100, Math.max(2, progress * 100))}%`,
-                                                borderRadius: 10
-                                            }} />
-                                        </TouchableOpacity>
+                                                height: 44,
+                                                backgroundColor: '#172033',
+                                                borderRadius: 14,
+                                                position: 'relative',
+                                                overflow: 'visible',
+                                                borderWidth: 1.5,
+                                                borderColor: '#334155',
+                                                justifyContent: 'center',
+                                                marginVertical: 4
+                                            }}>
+                                                {/* Relleno de progreso transcurrido */}
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    left: 0,
+                                                    top: 0,
+                                                    bottom: 0,
+                                                    width: `${Math.min(100, Math.max(0, progress * 100))}%`,
+                                                    backgroundColor: 'rgba(56, 189, 248, 0.28)',
+                                                    borderRadius: 12
+                                                }} />
+
+                                                {/* Área de toque para viajar / seek por toda la noche */}
+                                                <TouchableOpacity
+                                                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 10 }}
+                                                    activeOpacity={0.9}
+                                                    onPress={(e) => {
+                                                        const { locationX } = e.nativeEvent;
+                                                        e.target.measure((fx, fy, w) => {
+                                                            if (w > 0) {
+                                                                const pct = Math.max(0, Math.min(1, locationX / w));
+                                                                if (!isSelected) {
+                                                                    handlePlayPause(currentNight).then(() => handleSeek(pct));
+                                                                } else {
+                                                                    handleSeek(pct);
+                                                                }
+                                                            }
+                                                        });
+                                                    }}
+                                                />
+
+                                                {/* Puntos de eventos acústicos (Picos en la noche) */}
+                                                {currentNight.soundEvents && currentNight.soundEvents.map((evt, idx) => {
+                                                    const evOffset = (evt.offsetMs !== undefined && evt.offsetMs !== null) ? evt.offsetMs : (evt.relativeMs || 0);
+                                                    const leftPct = nightDurationMs > 0
+                                                        ? Math.min(96, Math.max(2, (evOffset / nightDurationMs) * 100))
+                                                        : 0;
+                                                    const evType = getEventType(evt);
+                                                    const dotColor = evColor(evType);
+                                                    const isEvSelected = selectedEvent && (
+                                                        selectedEvent.eventNumber === evt.eventNumber ||
+                                                        selectedEvent.timeLabel === evt.timeLabel ||
+                                                        Math.abs(((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0)) - evOffset) < 1000
+                                                    );
+
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={idx}
+                                                            activeOpacity={0.7}
+                                                            hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
+                                                            style={{
+                                                                position: 'absolute',
+                                                                left: `${leftPct}%`,
+                                                                top: '50%',
+                                                                marginTop: isEvSelected ? -12 : -9,
+                                                                marginLeft: isEvSelected ? -12 : -9,
+                                                                width: isEvSelected ? 24 : 18,
+                                                                height: isEvSelected ? 24 : 18,
+                                                                borderRadius: isEvSelected ? 12 : 9,
+                                                                backgroundColor: dotColor,
+                                                                borderWidth: isEvSelected ? 3.5 : 2,
+                                                                borderColor: isEvSelected ? '#ffffff' : '#0f172a',
+                                                                zIndex: isEvSelected ? 30 : 20,
+                                                                elevation: isEvSelected ? 9 : 4,
+                                                                shadowColor: dotColor,
+                                                                shadowOpacity: 0.9,
+                                                                shadowRadius: 5
+                                                            }}
+                                                            onPress={() => {
+                                                                playEventAtTime(evOffset, currentNight, evt);
+                                                            }}
+                                                        />
+                                                    );
+                                                })}
+
+                                                {/* Cabezal de reproducción (Playhead vertical) */}
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    left: `${Math.min(98.5, Math.max(0.5, progress * 100))}%`,
+                                                    top: 0,
+                                                    bottom: 0,
+                                                    width: 3.5,
+                                                    backgroundColor: '#38bdf8',
+                                                    borderRadius: 2,
+                                                    zIndex: 25,
+                                                    elevation: 6
+                                                }} />
+                                            </View>
+
+                                            {/* Leyenda resumida de colores */}
+                                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6, justifyContent: 'center' }}>
+                                                {[...new Set((currentNight.soundEvents || []).map(e => getEventType(e)))].map(type => {
+                                                    const evCount = (currentNight.soundEvents || []).filter(e => getEventType(e) === type).length;
+                                                    return (
+                                                        <View key={type} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' }}>
+                                                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: evColor(type) }} />
+                                                            <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>
+                                                                {getEventLabel(type)} ({evCount})
+                                                            </Text>
+                                                        </View>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+
+                                        {/* ─── TARJETA INTERACTIVA DE METADATOS DEL PICO SELECCIONADO ─── */}
+                                        {selectedEvent && (
+                                            <View style={{
+                                                marginVertical: 10,
+                                                padding: 14,
+                                                borderRadius: 14,
+                                                backgroundColor: '#1e293b',
+                                                borderWidth: 2,
+                                                borderColor: evColor(getEventType(selectedEvent)),
+                                                elevation: 6
+                                            }}>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                                        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: evColor(getEventType(selectedEvent)) }} />
+                                                        <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '900' }}>
+                                                            {getEventLabel(getEventType(selectedEvent))} Detectado
+                                                        </Text>
+                                                    </View>
+                                                    <TouchableOpacity
+                                                        onPress={() => setSelectedEvent(null)}
+                                                        style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)' }}
+                                                    >
+                                                        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>✕ Cerrar</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+
+                                                {/* Grid de Metadatos del evento */}
+                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
+                                                    <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>⏰ HORA REGISTRADA</Text>
+                                                        <Text style={{ color: '#f8fafc', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
+                                                            {selectedEvent.timeLabel || fmtMs((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0))} hrs
+                                                        </Text>
+                                                    </View>
+
+                                                    <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>⏱️ MOMENTO NOCTURNO</Text>
+                                                        <Text style={{ color: '#38bdf8', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
+                                                            +{fmtMs((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0))}
+                                                        </Text>
+                                                    </View>
+
+                                                    <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🔊 INTENSIDAD / PICO</Text>
+                                                        <Text style={{ color: '#fbbf24', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
+                                                            {selectedEvent.intensityDb ? `${selectedEvent.intensityDb} dB` : (selectedEvent.peakDb ? `${Math.abs(selectedEvent.peakDb)} dB` : '55 dB')}
+                                                        </Text>
+                                                    </View>
+
+                                                    <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🎯 CERTEZA IA</Text>
+                                                        <Text style={{ color: '#34d399', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
+                                                            {selectedEvent.confidence || 92}% confianza
+                                                        </Text>
+                                                    </View>
+                                                </View>
+
+                                                {/* Botón de acción sobre este pico */}
+                                                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                                                    <TouchableOpacity
+                                                        onPress={() => {
+                                                            const evOffset = (selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0);
+                                                            playEventAtTime(evOffset, currentNight, selectedEvent);
+                                                        }}
+                                                        style={{
+                                                            flex: 2,
+                                                            paddingVertical: 10,
+                                                            borderRadius: 10,
+                                                            backgroundColor: '#0284c7',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            flexDirection: 'row',
+                                                            gap: 6
+                                                        }}
+                                                    >
+                                                        <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '800' }}>
+                                                            ▶ Escuchar este tramo nocturno
+                                                        </Text>
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity
+                                                        onPress={() => handleSkip(-10)}
+                                                        style={{
+                                                            flex: 1,
+                                                            paddingVertical: 10,
+                                                            borderRadius: 10,
+                                                            backgroundColor: '#334155',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center'
+                                                        }}
+                                                    >
+                                                        <Text style={{ color: '#f1f5f9', fontSize: 12, fontWeight: '700' }}>
+                                                            ⏪ -10s
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+                                        )}
 
                                         {/* BOTONES GRANDES PARA SALTAR TIEMPO (15s y 1min) */}
-                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginTop: 6 }}>
                                             <TouchableOpacity
                                                 onPress={() => handleSkip(-60)}
                                                 style={{ flex: 1, paddingVertical: 10, backgroundColor: '#1e293b', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' }}
@@ -2921,102 +3122,79 @@ El sistema web ya puede procesar tus estadísticas.`
                                             </TouchableOpacity>
                                         </View>
 
-                                        {/* RESUMEN DE EVENTOS DETECTADOS DE ESTA NOCHE */}
+                                        {/* LISTA COMPLETA DE EVENTOS DE ESTA NOCHE (INTEGRADA A LA LÍNEA DE TIEMPO) */}
                                         {currentNight.soundEvents && currentNight.soundEvents.length > 0 && (
-                                            <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
+                                            <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
                                                 <Text style={{ color: '#cbd5e1', fontSize: 14, fontWeight: '800', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                                    📊 Resumen Acústico de la Noche:
+                                                    🔔 Eventos Acústicos de la Noche ({currentNight.soundEvents.length}):
                                                 </Text>
 
-                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                                                    {[...new Set(currentNight.soundEvents.map(e => getEventType(e)))].map(type => {
-                                                        const evCount = currentNight.soundEvents.filter(e => getEventType(e) === type).length;
-                                                        return (
-                                                            <View key={type} style={{
-                                                                flexDirection: 'row',
-                                                                alignItems: 'center',
-                                                                gap: 6,
-                                                                paddingVertical: 6,
-                                                                paddingHorizontal: 12,
-                                                                borderRadius: 10,
-                                                                backgroundColor: '#1e293b',
-                                                                borderWidth: 1,
-                                                                borderColor: '#334155'
-                                                            }}>
-                                                                <Text style={{ color: '#f8fafc', fontSize: 13, fontWeight: '700' }}>
-                                                                    {getEventLabel(type)}:
-                                                                </Text>
-                                                                <Text style={{ color: '#38bdf8', fontSize: 13, fontWeight: '900' }}>
-                                                                    {evCount}
-                                                                </Text>
-                                                            </View>
-                                                        );
-                                                    })}
-                                                </View>
-
-                                                {/* LISTA COMPLETA DE EVENTOS DE ESTA NOCHE CON BOTÓN ESCUCHAR GRANDE */}
-                                                <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '700', marginBottom: 8 }}>
-                                                    🔔 Eventos Detectados (Toca para escuchar el audio de cada uno):
-                                                </Text>
-
-                                                <View style={{ gap: 6 }}>
+                                                <View style={{ gap: 7 }}>
                                                     {currentNight.soundEvents.map((evt, idx) => {
                                                         const evOffset = (evt.offsetMs !== undefined && evt.offsetMs !== null) ? evt.offsetMs : (evt.relativeMs || 0);
                                                         const evType = getEventType(evt);
                                                         const typeLabel = getEventLabel(evType);
                                                         const timeStr = evt.timeLabel || fmtMs(evOffset);
-                                                        const isEvPlaying = isSelected && playing && Math.abs(posMs - evOffset) < 3000;
+                                                        const isEvSelected = selectedEvent && (
+                                                            selectedEvent.eventNumber === evt.eventNumber ||
+                                                            selectedEvent.timeLabel === evt.timeLabel ||
+                                                            Math.abs(((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0)) - evOffset) < 1000
+                                                        );
 
                                                         return (
-                                                            <View
+                                                            <TouchableOpacity
                                                                 key={idx}
+                                                                activeOpacity={0.8}
+                                                                onPress={() => {
+                                                                    playEventAtTime(evOffset, currentNight, evt);
+                                                                }}
                                                                 style={{
                                                                     flexDirection: 'row',
                                                                     alignItems: 'center',
                                                                     justifyContent: 'space-between',
-                                                                    paddingVertical: 10,
+                                                                    paddingVertical: 12,
                                                                     paddingHorizontal: 14,
                                                                     borderRadius: 12,
-                                                                    backgroundColor: isEvPlaying ? 'rgba(56, 189, 248, 0.15)' : '#1e293b',
+                                                                    backgroundColor: isEvSelected ? 'rgba(56, 189, 248, 0.16)' : '#1e293b',
                                                                     borderWidth: 1.5,
-                                                                    borderColor: isEvPlaying ? '#38bdf8' : '#334155',
-                                                                    minHeight: 56
+                                                                    borderColor: isEvSelected ? '#38bdf8' : '#334155',
+                                                                    minHeight: 58
                                                                 }}
                                                             >
                                                                 <View style={{ flex: 1, paddingRight: 8 }}>
-                                                                    <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800' }}>
-                                                                        {typeLabel}
-                                                                    </Text>
-                                                                    <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
-                                                                        ⏰ Hora: {timeStr} · Duración: {evt.duration || 4}s
+                                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: evColor(evType) }} />
+                                                                        <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800' }}>
+                                                                            {typeLabel}
+                                                                        </Text>
+                                                                    </View>
+                                                                    <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 3 }}>
+                                                                        ⏰ {timeStr} · +{fmtMs(evOffset)} transcurridos · {evt.intensityDb ? `${evt.intensityDb} dB` : '55 dB'}
                                                                     </Text>
                                                                 </View>
 
-                                                                <TouchableOpacity
-                                                                    activeOpacity={0.8}
-                                                                    onPress={() => playEventAtTime(evOffset, currentNight, evType)}
-                                                                    style={{
-                                                                        backgroundColor: isEvPlaying ? '#d97706' : '#065f46',
-                                                                        borderColor: isEvPlaying ? '#f59e0b' : '#10b981',
-                                                                        borderWidth: 1.5,
-                                                                        paddingVertical: 8,
-                                                                        paddingHorizontal: 14,
-                                                                        borderRadius: 10,
-                                                                        flexDirection: 'row',
-                                                                        alignItems: 'center',
-                                                                        gap: 6
-                                                                    }}
-                                                                >
+                                                                <View style={{
+                                                                    backgroundColor: isEvSelected ? '#0284c7' : '#065f46',
+                                                                    borderColor: isEvSelected ? '#38bdf8' : '#10b981',
+                                                                    borderWidth: 1.5,
+                                                                    paddingVertical: 8,
+                                                                    paddingHorizontal: 12,
+                                                                    borderRadius: 10,
+                                                                    flexDirection: 'row',
+                                                                    alignItems: 'center',
+                                                                    gap: 5
+                                                                }}>
                                                                     <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '800' }}>
-                                                                        {isEvPlaying ? '⏸ Sonando' : '🔊 Escuchar'}
+                                                                        {isEvSelected ? '📍 En reproducción' : '▶ Ir al punto'}
                                                                     </Text>
-                                                                </TouchableOpacity>
-                                                            </View>
+                                                                </View>
+                                                            </TouchableOpacity>
                                                         );
                                                     })}
                                                 </View>
                                             </View>
                                         )}
+
 
                                         {/* Botón de Eliminación Seguro y Discreto */}
                                         <View style={{ marginTop: 20, alignItems: 'center' }}>
