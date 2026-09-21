@@ -768,6 +768,79 @@ export default function RecordingScreen({ token, onLogout }) {
                 }
             }
 
+            // Sincronizar y recuperar sesiones nocturnas históricas desde la nube (/api/night-sessions/history)
+            if (token) {
+                try {
+                    const nightHistoryRes = await axios.get(`${API_URL}/night-sessions/history?limit=30`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        timeout: 8000,
+                    });
+                    const remoteNights = nightHistoryRes.data?.sessions || [];
+
+                    for (const ns of remoteNights) {
+                        if (deletedCloudSet.has(ns._id) || deletedCloudSet.has(ns.sessionId)) continue;
+
+                        const sDate = ns.sessionDate;
+                        // Check if we already have a local recording for this night
+                        const existing = list.find((r) => r.isNightSession && (r.sessionDate === sDate || r.id === ns.sessionId || r.cloudId === ns._id));
+
+                        if (existing) {
+                            existing.cloudId = ns._id;
+                            existing.isCloudSynced = true;
+                            if (ns.einsdreamScore) existing.einsdreamScore = ns.einsdreamScore;
+                            if (ns.soundEvents && ns.soundEvents.length > 0 && (!existing.soundEvents || existing.soundEvents.length === 0)) {
+                                existing.soundEvents = ns.soundEvents;
+                                existing.eventsCount = ns.soundEvents.length;
+                            }
+                        } else {
+                            // Night recorded and synced to cloud, restore into recordings list!
+                            const startD = new Date(ns.startTime || (sDate + 'T00:00:00'));
+                            const endD = new Date(ns.endTime || (startD.getTime() + (ns.totalDurationMs || 28800000)));
+                            const startTs = startD.getTime();
+                            const durMs = ns.totalDurationMs || Math.max(60000, endD.getTime() - startTs);
+                            const events = ns.soundEvents || ns.correlatedEvents || [];
+                            const score = ns.einsdreamScore?.totalScore;
+
+                            const label = ns.isDualSession
+                                ? `👥 Noche en Pareja (${ns.pairRole === 'right' ? 'Der' : 'Izq'}) - ${startD.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                                : `🌙 Noche del ${startD.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}${score !== undefined ? ` (Score: ${score})` : ''}`;
+
+                            list.push({
+                                id: ns.sessionId || `night_${sDate}`,
+                                filename: `noche_${sDate}_${startTs}.m4a`,
+                                cloudId: ns._id,
+                                uri: null, // Telemetría acústica pura sincronizada con la nube
+                                label,
+                                eventType: 'night_session',
+                                confidence: 100,
+                                intensityDb: 55,
+                                sizeBytes: Math.round(durMs / 1000 * 4000),
+                                sizeKb: Math.round((durMs / 1000 * 4000) / 1024),
+                                modTime: startTs,
+                                dateStr: startD.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+                                isNightSession: true,
+                                sessionDate: sDate,
+                                soundEvents: events,
+                                durationMs: durMs,
+                                eventsCount: events.length,
+                                startTimestamp: startTs,
+                                endTimestamp: endD.getTime(),
+                                isCloudSynced: true,
+                                isTelemetryOnly: true,
+                                einsdreamScore: ns.einsdreamScore,
+                                dimensions: ns.dimensions,
+                                pauseSegments: ns.pauseSegments || [],
+                                sleepSummary: ns.sleepSummary || {},
+                                pairData: ns.pairData,
+                                pairRole: ns.pairRole,
+                            });
+                        }
+                    }
+                } catch (nightErr) {
+                    console.warn('[refreshRecordings night history sync]', nightErr.message);
+                }
+            }
+
             list.sort((a, b) => b.modTime - a.modTime);
 
             // ─── Auto-Inyección en Caché de SCORE para las Noches Locales ──────────────
@@ -888,6 +961,24 @@ export default function RecordingScreen({ token, onLogout }) {
 
     const handlePlayPause = async (rec) => {
         try {
+            if (!rec.uri) {
+                setNightAnalysis(rec);
+                Alert.alert(
+                    '📊 Telemetría y Score Guardados',
+                    `Esta noche (${rec.sessionDate}) tiene su Score (${rec.einsdreamScore?.totalScore ?? 85}/100) y ${rec.eventsCount || 0} eventos registrados.
+
+¿Deseas ver el desglose completo de la noche en la pestaña Score?`,
+                    [
+                        { text: 'Permanecer aquí', style: 'cancel' },
+                        {
+                            text: 'Ver Score',
+                            onPress: () => setActiveTab('score')
+                        }
+                    ]
+                );
+                return;
+            }
+
             const trackId = rec.id || rec.filename;
             if (playingUri !== trackId && playingUri !== rec.uri) {
                 await unloadSound();
@@ -1025,22 +1116,32 @@ export default function RecordingScreen({ token, onLogout }) {
                 style: 'destructive',
                 onPress: async () => {
                     if (playingUri === rec.uri) await unloadSound();
+
+                    // Blocklist local
+                    try {
+                        const delPath  = getBaseDir() + DELETED_CLOUD_IDS_FILENAME;
+                        const delInfo  = await FileSystem.getInfoAsync(delPath);
+                        const existing = delInfo.exists
+                            ? JSON.parse(await FileSystem.readAsStringAsync(delPath))
+                            : [];
+                        const idToBlock = rec.cloudId || rec.id;
+                        if (idToBlock && !existing.includes(idToBlock)) {
+                            existing.push(idToBlock);
+                            await FileSystem.writeAsStringAsync(delPath, JSON.stringify(existing));
+                        }
+                    } catch (_) {}
+
+                    if (rec.isNightSession) {
+                        const nightId = rec.cloudId || rec.id;
+                        if (token && nightId) {
+                            axios.delete(`${API_URL}/night-sessions/${nightId}`, {
+                                headers: { Authorization: `Bearer ${token}` },
+                                timeout: 6000,
+                            }).catch(() => {});
+                        }
+                    }
+
                     if (rec.isCloud) {
-                        // FIX v2.8.0: Guardar ID en blocklist local para que no
-                        // reaparezca en el próximo refreshRecordings()
-                        try {
-                            const delPath  = getBaseDir() + DELETED_CLOUD_IDS_FILENAME;
-                            const delInfo  = await FileSystem.getInfoAsync(delPath);
-                            const existing = delInfo.exists
-                                ? JSON.parse(await FileSystem.readAsStringAsync(delPath))
-                                : [];
-                            const idToBlock = rec.cloudId || rec.id;
-                            if (idToBlock && !existing.includes(idToBlock)) {
-                                existing.push(idToBlock);
-                                await FileSystem.writeAsStringAsync(delPath, JSON.stringify(existing));
-                            }
-                        } catch (_) {}
-                        // Intentar eliminar del backend (best-effort)
                         if (token && (rec.cloudId || rec.id)) {
                             axios.delete(`${API_URL}/sessions/${rec.cloudId || rec.id}`, {
                                 headers: { Authorization: `Bearer ${token}` },
