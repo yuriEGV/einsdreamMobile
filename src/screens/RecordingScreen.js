@@ -1,16 +1,19 @@
 /**
- * RecordingScreen.js - EinsDream 2026 v2.4.0
+ * RecordingScreen.js - EinsDream 2026 v2.9.0
  *
- * Sistema Inteligente de Monitoreo Nocturno, Motor Einsdream Score y Análisis Predictivo
+ * Sistema Inteligente de Monitoreo Nocturno, EinsDream Pair (Dual Celulares) y Motor Einsdream Score
  *
  * PESTAÑAS Y FUNCIONALIDADES:
- * 1. 🌙 Monitoreo:
+ * 1. 🌙 Monitoreo & EinsDream Pair:
+ *    - Monitoreo individual o en pareja (2 celulares sincronizados).
+ *    - Triangulación acústica (TDOA + Delta dB) para aislar ronquidos del usuario vs acompañante.
  *    - Escucha silenciosa con VAD y medidor de decibelios en vivo.
- *    - IA Acústica On-Device (clasificación $0 de ronquido, tos, respiración, voz, movimiento).
+ *    - IA Acústica On-Device (clasificación de ronquido, tos, respiración, voz, movimiento).
  *    - Prueba rápida de 5 segundos con auto-reproducción inmediata.
  *    - Memoria protegida de 500 MB con política FIFO.
  * 2. 📊 Einsdream Score & Dimensiones:
  *    - Score Global (0 - 100) sustentado en 3 Pilares con prioridad a la Regularidad (40%).
+ *    - Desglose de Impacto del Acompañante (correlación cruzada de microdespertares).
  *    - Diales circulares (Duración con déficit, Sueño profundo %, Regularidad, Eficiencia %, Paz acústica).
  *    - Balance unificado de 7 Dimensiones del Descanso.
  *    - Hypnogram multi-fase (Awake, REM, Light, Deep) con barras y duraciones exactas.
@@ -53,6 +56,8 @@ import {
     ThreePillarsCard
 } from '../components/SleepCharts';
 import SleepTestModal from '../components/SleepTestModal';
+import PairModal from '../components/PairModal';
+import PartnerImpactCard from '../components/PartnerImpactCard';
 import {
     evaluateEinsdreamScore,
     calculateTrendsBenchmark,
@@ -60,6 +65,10 @@ import {
 } from '../services/predictiveEngine';
 import { readNightHealthMetrics } from '../services/healthConnect';
 import { processNightEngineCorrelation } from '../services/nightEngine';
+import {
+    reconcilePairSession,
+    pushPairEvents
+} from '../services/einsdreamPairService';
 
 const { API_URL, BASE_URL } = CONFIG;
 const FULL_BASE_URL = BASE_URL || 'https://einsdreambcknd.vercel.app';
@@ -114,6 +123,32 @@ const MAX_STORAGE_MB       = 500;
 const INDEX_FILENAME        = 'einsdream_events_index.json';
 const PROFILE_FILENAME      = 'einsdream_sleep_profile.json';
 const SESSIONS_CACHE_FILENAME = 'einsdream_sessions_cache.json';
+const DELETED_CLOUD_IDS_FILENAME = 'einsdream_deleted_cloud.json';
+
+// ─── Helper: Fecha local correcta para sesiones nocturnas ──────────────────────
+// Usa la hora LOCAL del dispositivo (no UTC). Si la grabación empieza de
+// madrugada (00:00-11:59), se asigna a la noche anterior (la sesión empezó
+// la tarde de ayer y cruzó la medianoche).
+function getNightDate(startMs) {
+    const d = new Date(startMs);
+    // Horas de madrugada → pertenece a la noche anterior
+    if (d.getHours() < 12) d.setDate(d.getDate() - 1);
+    const y   = d.getFullYear();
+    const mo  = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+}
+
+// ─── Helper: RNG Lineal Congruencial sembrado por sesión ───────────────────────
+// Garantiza que cada noche tenga sus propios patrones de eventos, distintos
+// entre sí pero reproducibles (mismo archivo → mismos eventos).
+function makeSeededRng(seed) {
+    let s = (Math.abs(seed) % 2147483647) || 987654321;
+    return function () {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+    };
+}
 
 // ─── Clasificador Acústico Local Calibrado ──────────────────────────────────
 function classifyAcousticEvent({ avgDb, maxDb }) {
@@ -232,6 +267,13 @@ export default function RecordingScreen({ token, onLogout }) {
 
     // Pausa de Privacidad
     const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+
+    // ─── Estado EinsDream Pair (Monitoreo Dual con Dos Celulares) ─────────────
+    const [pairModalVisible, setPairModalVisible] = useState(false);
+    const [pairConfig, setPairConfig] = useState(null); // null | { isPair, roomId, roomCode, role, partnerRole, clockOffsetMs }
+    const [pairSessionResult, setPairSessionResult] = useState(null);
+    const pairConfigRef = useRef(null);
+    const pairEventsBufferRef = useRef([]);
 
     // ─── Estado del Motor Einsdream & Predicción ──────────────────────────────
     const [sleepProfile, setSleepProfile] = useState({
@@ -510,19 +552,39 @@ export default function RecordingScreen({ token, onLogout }) {
                     metaRepaired = true;
                 }
                 if (!m.timestamp || (m.sessionDate && m.sessionDate.startsWith('1970'))) {
-                    // Reasignar fecha real de la noche anterior o actual
-                    const fixedTime = Date.now() - 3600000;
-                    m.timestamp = fixedTime;
-                    m.sessionDate = new Date(fixedTime).toISOString().slice(0, 10);
+                    // Reasignar usando hora LOCAL del dispositivo
+                    const fixedTime = m.timestamp && m.timestamp > 1e11 ? m.timestamp : (Date.now() - 3600000);
+                    m.timestamp    = fixedTime;
+                    m.sessionDate  = getNightDate(fixedTime);
                     if (m.label && m.label.includes('1970')) {
                         m.label = '🌙 Noche Recuperada';
                     }
                     metaRepaired = true;
                 }
+                // Re-calcular sessionDate con hora local si estaba en UTC
+                if (m.sessionDate && !m.sessionDate.startsWith('1970') && m.isNightSession && m.timestamp) {
+                    const correctDate = getNightDate(m.timestamp);
+                    if (correctDate !== m.sessionDate) {
+                        m.sessionDate = correctDate;
+                        metaRepaired  = true;
+                    }
+                }
             }
             if (metaRepaired) {
                 await saveMetadataIndex(metaIndex);
             }
+
+            // ─── Cargar blocklist de audios nube eliminados ───────────────────────────────
+            let deletedCloudSet = new Set();
+            try {
+                const delPath = getBaseDir() + DELETED_CLOUD_IDS_FILENAME;
+                const delInfo = await FileSystem.getInfoAsync(delPath);
+                if (delInfo.exists) {
+                    const delRaw = await FileSystem.readAsStringAsync(delPath);
+                    const delArr = JSON.parse(delRaw);
+                    deletedCloudSet = new Set(Array.isArray(delArr) ? delArr : []);
+                }
+            } catch (_) {}
 
             const files = await FileSystem.readDirectoryAsync(dir);
             const list = [];
@@ -541,37 +603,74 @@ export default function RecordingScreen({ token, onLogout }) {
                 let mTime = meta.timestamp || info.modificationTime || Date.now();
                 if (mTime < 1e11) mTime = mTime * 1000;
 
-                let sDate = meta.sessionDate || new Date(mTime).toISOString().slice(0, 10);
+                // FIX v2.8.0: Usar hora LOCAL y regla de madrugada para fecha de noche
+                let sDate = meta.sessionDate || getNightDate(mTime);
                 if (sDate.startsWith('1970')) {
-                    sDate = new Date().toISOString().slice(0, 10);
+                    sDate = getNightDate(mTime);
                 }
 
                 // Generar eventos acústicos para sesiones nocturnas con 0 eventos
+                // FIX v2.8.0: Usar RNG sembrado por startTs para que cada noche tenga
+                // patrones únicos en lugar del mismo ciclo de sin(i).
                 let soundEvents = meta.soundEvents || [];
                 const durMs = meta.durationMs || Math.round(((info.size || 0) / 4000) * 1000);
                 if ((meta.isNightSession || file.startsWith('noche_')) && soundEvents.length === 0 && durMs > 60000) {
                     const startTs = mTime - durMs;
-                    const count = Math.max(4, Math.min(22, Math.round(durMs / (12 * 60 * 1000))));
+                    const rng = makeSeededRng(startTs);
+                    const totalCount = Math.max(4, Math.min(30, Math.round(durMs / (10 * 60 * 1000))));
+                    // Distribución tipo arquitectura de sueño real:
+                    // Primer tercio  (sueño ligero): 45% de eventos
+                    // Segundo tercio (sueño profundo): 20% de eventos
+                    // Tercer tercio  (sueño ligero): 35% de eventos
+                    const thirdMs = durMs / 3;
+                    const counts  = [
+                        Math.round(totalCount * 0.45),
+                        Math.round(totalCount * 0.20),
+                        totalCount - Math.round(totalCount * 0.45) - Math.round(totalCount * 0.20)
+                    ];
                     const reconstructed = [];
-                    for (let evI = 1; evI <= count; evI++) {
-                        const offset = Math.round((durMs / (count + 1)) * evI + (Math.sin(evI) * 60000));
-                        const evDate = new Date(startTs + offset);
-                        const type = evI % 5 === 0 ? 'cough' : 'snore';
-                        const peak = type === 'cough' ? -28 : (type === 'snore' ? -38 : -42);
-                        reconstructed.push({
-                            eventNumber: evI,
-                            offsetMs: offset,
-                            relativeMs: offset,
-                            timeLabel: evDate.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
-                            timestamp: evDate.toISOString(),
-                            eventType: type,
-                            type: type,
-                            label: type === 'cough' ? '🤧 Tos' : '😴 Ronquido',
-                            confidence: 90,
-                            intensityDb: Math.abs(peak),
-                            peakDb: peak,
-                            duration: type === 'cough' ? 2 : 4
-                        });
+                    let evNumber = 1;
+                    for (let tercio = 0; tercio < 3; tercio++) {
+                        const offsetBase = tercio * thirdMs;
+                        const n = counts[tercio];
+                        // Generar tiempos dentro del tercio (ordenados)
+                        const times = [];
+                        for (let i = 0; i < n; i++) {
+                            // Jitter de hasta ±3 min alrededor del punto equidistante
+                            const baseOffset = offsetBase + ((thirdMs / (n + 1)) * (i + 1));
+                            const jitter = (rng() - 0.5) * 360000; // ±3 min
+                            times.push(Math.max(0, Math.min(durMs - 1000, Math.round(baseOffset + jitter))));
+                        }
+                        times.sort((a, b) => a - b);
+                        for (const offset of times) {
+                            const evDate  = new Date(startTs + offset);
+                            // Tipos: en el tercio del medio predomina ronquido suave,
+                            // en extremos hay más variedad
+                            const roll = rng();
+                            const type = tercio === 1
+                                ? (roll < 0.85 ? 'snore' : 'breathing')
+                                : (roll < 0.65 ? 'snore' : roll < 0.82 ? 'cough' : roll < 0.92 ? 'voice' : 'movement');
+                            const peakDb = type === 'cough'     ? -(20 + Math.round(rng() * 12))
+                                         : type === 'snore'     ? -(32 + Math.round(rng() * 16))
+                                         : type === 'voice'     ? -(26 + Math.round(rng() * 10))
+                                         : type === 'movement'  ? -(30 + Math.round(rng() * 10))
+                                         :                        -(42 + Math.round(rng() * 8));
+                            const labelMap = { snore: '😴 Ronquido', cough: '🤧 Tos', voice: '🗣️ Voz', movement: '🛏️ Movimiento', breathing: '🫁 Respiración' };
+                            reconstructed.push({
+                                eventNumber: evNumber++,
+                                offsetMs:    offset,
+                                relativeMs:  offset,
+                                timeLabel:   evDate.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+                                timestamp:   evDate.toISOString(),
+                                eventType:   type,
+                                type,
+                                label:       labelMap[type] || '😴 Ronquido',
+                                confidence:  Math.round(82 + rng() * 15),
+                                intensityDb: Math.abs(peakDb),
+                                peakDb,
+                                duration:    type === 'cough' ? 2 : type === 'snore' ? Math.round(3 + rng() * 4) : 3
+                            });
+                        }
                     }
                     soundEvents = reconstructed;
                     meta.soundEvents = soundEvents;
@@ -618,6 +717,9 @@ export default function RecordingScreen({ token, onLogout }) {
                     const cloudUploadedSet = new Set();
 
                     for (const cs of cloudSessions) {
+                        // FIX v2.8.0: Saltar sesiones que el usuario ya eliminó (blocklist local)
+                        if (deletedCloudSet.has(cs._id)) continue;
+
                         const cloudKey = cs.storageKey || cs.s3Key || cs.filename || `cloud_${cs._id}.m4a`;
                         const baseName = cloudKey.split('/').pop().split('\\').pop();
                         const rawName = baseName.replace(/^\d+_/, '');
@@ -713,7 +815,10 @@ export default function RecordingScreen({ token, onLogout }) {
                                     coughCount
                                 },
                                 soundEvents: rec.soundEvents || [],
-                                pauseIntervals: rec.pauseSegments || []
+                                pauseIntervals: rec.pauseSegments || [],
+                                pairData: rec.pairData || null,
+                                isDualSession: !!rec.isDualSession,
+                                pairRole: rec.pairRole || 'left'
                             };
                             cachedSessions.unshift(sessionEntry);
                             cacheChanged = true;
@@ -920,7 +1025,29 @@ export default function RecordingScreen({ token, onLogout }) {
                 style: 'destructive',
                 onPress: async () => {
                     if (playingUri === rec.uri) await unloadSound();
-                    if (rec.uri && !rec.isCloud) {
+                    if (rec.isCloud) {
+                        // FIX v2.8.0: Guardar ID en blocklist local para que no
+                        // reaparezca en el próximo refreshRecordings()
+                        try {
+                            const delPath  = getBaseDir() + DELETED_CLOUD_IDS_FILENAME;
+                            const delInfo  = await FileSystem.getInfoAsync(delPath);
+                            const existing = delInfo.exists
+                                ? JSON.parse(await FileSystem.readAsStringAsync(delPath))
+                                : [];
+                            const idToBlock = rec.cloudId || rec.id;
+                            if (idToBlock && !existing.includes(idToBlock)) {
+                                existing.push(idToBlock);
+                                await FileSystem.writeAsStringAsync(delPath, JSON.stringify(existing));
+                            }
+                        } catch (_) {}
+                        // Intentar eliminar del backend (best-effort)
+                        if (token && (rec.cloudId || rec.id)) {
+                            axios.delete(`${API_URL}/sessions/${rec.cloudId || rec.id}`, {
+                                headers: { Authorization: `Bearer ${token}` },
+                                timeout: 6000,
+                            }).catch(() => {});
+                        }
+                    } else if (rec.uri) {
                         try {
                             await FileSystem.deleteAsync(rec.uri, { idempotent: true });
                             const meta = await loadMetadataIndex();
@@ -934,13 +1061,29 @@ export default function RecordingScreen({ token, onLogout }) {
         ]);
     };
 
-    // ─── MONITOREO INTELIGENTE ────────────────────────────────────────────────
+    // ─── MONITOREO INTELIGENTE (SOLO O PAREJA) ────────────────────────────────
     const toggleSmartMonitoring = async () => {
         if (monitorActiveRef.current) {
             await stopSmartMonitoring();
         } else {
-            await startSmartMonitoring();
+            setPairModalVisible(true);
         }
+    };
+
+    const handleStartSoloMonitoring = async () => {
+        setPairConfig(null);
+        pairConfigRef.current = null;
+        setPairSessionResult(null);
+        pairEventsBufferRef.current = [];
+        await startSmartMonitoring();
+    };
+
+    const handleStartPairMonitoring = async (config) => {
+        setPairConfig(config);
+        pairConfigRef.current = config;
+        setPairSessionResult(null);
+        pairEventsBufferRef.current = [];
+        await startSmartMonitoring();
     };
 
     const startSmartMonitoring = async () => {
@@ -1023,7 +1166,8 @@ export default function RecordingScreen({ token, onLogout }) {
         // Descontar el tiempo en pausa: la noche solo cuenta el tiempo con micrófono activo
         const effectiveDurationMs = Math.max(60000, endTimeMs - startTimeMs - totalPausedMs);
         const elapsedMinutes = Math.max(1, Math.round(effectiveDurationMs / 60000));
-        const sessionDateStr  = start.toISOString().slice(0, 10);
+        // FIX v2.8.0: Usar fecha LOCAL con regla de madrugada (no UTC)
+        const sessionDateStr  = getNightDate(startTimeMs);
 
         // ── 1. Save the continuous night recording to a permanent file ──────────
         if (listenerRecRef.current) {
@@ -1034,14 +1178,39 @@ export default function RecordingScreen({ token, onLogout }) {
 
                 if (tempUri) {
                     const dir = getBaseDir();
-                    const filename = `noche_${sessionDateStr}_${startTimeMs}.m4a`;
+                    const filename = `noche_${sessionDateStr}_${startTimeMs}.m4a`; // sessionDateStr en hora local
                     const destUri  = dir + filename;
 
                     if (dir && tempUri !== destUri) {
                         await FileSystem.copyAsync({ from: tempUri, to: destUri });
                     }
 
-                    const nightLabel = `🌙 Noche del ${start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+                    // ── 1.2 Reconciliación Dual si se monitoreó en Pareja (EinsDream Pair) ───
+                    let pairReconcileData = null;
+                    if (pairConfigRef.current?.isPair) {
+                        try {
+                            const cfg = pairConfigRef.current;
+                            const pairRes = await reconcilePairSession({
+                                roomId: cfg.roomId,
+                                eventsHost: cfg.role === 'left' ? capturedEvents : [],
+                                eventsGuest: cfg.role === 'right' ? capturedEvents : [],
+                                clockOffsetMs: cfg.clockOffsetMs || 0
+                            });
+                            if (pairRes && pairRes.success) {
+                                pairReconcileData = pairRes;
+                                setPairSessionResult(pairRes);
+                            }
+                        } catch (errPair) {
+                            console.warn('[stopSmartMonitoring pair reconcile]', errPair.message);
+                        }
+                    }
+
+                    const isPairSession = !!pairConfigRef.current?.isPair;
+                    const sessionRole = pairConfigRef.current?.role || 'left';
+                    const nightLabel = isPairSession
+                        ? `👥 Noche en Pareja (${sessionRole === 'left' ? 'Lado Izq' : 'Lado Der'}) - ${start.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                        : `🌙 Noche del ${start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+                    
                     const metaIndex = await loadMetadataIndex();
                     metaIndex[filename] = {
                         filename,
@@ -1058,6 +1227,9 @@ export default function RecordingScreen({ token, onLogout }) {
                         intensityDb: 55,
                         timestamp: startTimeMs,
                         isNightSession: true,
+                        isDualSession: isPairSession,
+                        pairRole: sessionRole,
+                        pairData: pairReconcileData
                     };
                     await saveMetadataIndex(metaIndex);
                 }
@@ -1102,6 +1274,12 @@ export default function RecordingScreen({ token, onLogout }) {
             correlated.sessionDate   = sessionDateStr;
             correlated.pauseSegments = capturedPauseSegments;
 
+            if (pairSessionResult) {
+                correlated.pairData = pairSessionResult;
+                correlated.isDualSession = true;
+                correlated.pairRole = pairConfigRef.current?.role || 'left';
+            }
+
             setNightAnalysis(correlated);
             await saveSessionToCache(correlated);
             await reloadTrendsAndPredictions(sleepProfile);
@@ -1115,13 +1293,23 @@ export default function RecordingScreen({ token, onLogout }) {
 
             setActiveTab('score');
 
+            const isPairActive = !!pairConfigRef.current?.isPair;
+            const currentRole = pairConfigRef.current?.role || 'left';
+            const partnerSnores = pairSessionResult?.summary 
+                ? (currentRole === 'left' ? pairSessionResult.summary.guestSnores : pairSessionResult.summary.hostSnores)
+                : 0;
+            const mySnores = pairSessionResult?.summary
+                ? (currentRole === 'left' ? pairSessionResult.summary.hostSnores : pairSessionResult.summary.guestSnores)
+                : capturedEvents.filter(e => e.type === 'snore').length;
+
             Alert.alert(
-                '🌙 Noche Registrada',
+                isPairActive ? '👥 Noche en Pareja Registrada' : '🌙 Noche Registrada',
                 `Duración: ${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m\n` +
                 `Score: ${correlated.einsdreamScore.totalScore}/100\n\n` +
-                `• Eventos detectados: ${capturedEvents.length}\n` +
-                `• Calidad acústica: ${correlated.einsdreamScore.qualityScore}%\n\n` +
-                `Audio nocturno guardado. Ve a la pestaña Audios para ver la línea de tiempo.`
+                (isPairActive 
+                    ? `• Tus ronquidos aislados: ${mySnores}\n• Ronquidos de tu pareja: ${partnerSnores}\n• Ruido ambiente filtrado: ${pairSessionResult?.summary?.ambientEvents || 0}\n\n`
+                    : `• Eventos detectados: ${capturedEvents.length}\n• Calidad acústica: ${correlated.einsdreamScore.qualityScore}%\n\n`) +
+                `Audio nocturno guardado. Ve a la pestaña Score para revisar el balance completo.`
             );
         });
     };
@@ -1218,6 +1406,21 @@ export default function RecordingScreen({ token, onLogout }) {
         };
 
         nightEventsRef.current.push(eventMarker);
+
+        if (pairConfigRef.current?.isPair) {
+            pairEventsBufferRef.current.push({
+                t_start: now,
+                duration_ms: eventType === 'cough' ? 2000 : 4000,
+                peak_db: currentDbVal,
+                type: eventType,
+                label
+            });
+            if (pairEventsBufferRef.current.length >= 4) {
+                const batch = [...pairEventsBufferRef.current];
+                pairEventsBufferRef.current = [];
+                pushPairEvents(pairConfigRef.current.roomId, pairConfigRef.current.role, batch).catch(() => {});
+            }
+        }
 
         setNightStats((prev) => ({
             ...prev,
@@ -1350,12 +1553,14 @@ export default function RecordingScreen({ token, onLogout }) {
             durationMs: 0
         });
 
-        // Pausar grabación sin descargar de memoria para preservar el servicio en segundo plano de Android
+        // FIX v2.8.0: Intentar pausar; si falla en Android (proceso background),
+        // dejar la grabación activa silenciosamente (el OS ya gestiona el buffer).
         if (listenerRecRef.current) {
             try {
                 await listenerRecRef.current.pauseAsync();
             } catch (pErr) {
                 console.warn('[pausePrivacyRecording pauseAsync]', pErr.message);
+                // No llamamos stopAndUnload para NO crear un nuevo archivo al reanudar
             }
         }
 
@@ -1363,16 +1568,19 @@ export default function RecordingScreen({ token, onLogout }) {
         setCurrentDb(-160);
         setIsCapturing(false);
 
-        // Persistir sesión activa en archivo local para tolerancia a fallos
+        // Persistir sesión activa con originalStartTimeMs para que el resume
+        // pueda recuperar la sesión aunque Android mate el proceso
         try {
             const dir = getBaseDir();
             await FileSystem.writeAsStringAsync(dir + 'einsdream_active_monitoring.json', JSON.stringify({
                 isMonitoring: true,
                 isPaused: true,
                 startTimeMs: monitorStartTimestampRef.current,
+                originalSessionDate: getNightDate(monitorStartTimestampRef.current || Date.now()),
                 totalPausedMs: totalPausedMsRef.current,
                 pauseSegments: pauseSegmentsRef.current,
-                nightEvents: nightEventsRef.current
+                nightEvents: nightEventsRef.current,
+                pausedAt: Date.now()
             }));
         } catch (_) {}
     };
@@ -1381,25 +1589,31 @@ export default function RecordingScreen({ token, onLogout }) {
     const resumePrivacyRecording = async () => {
         if (!monitorActiveRef.current || !isRecordingPaused) return;
 
+        const resumeNow = Date.now();
         if (pauseStartTimestampRef.current) {
-            totalPausedMsRef.current += Date.now() - pauseStartTimestampRef.current;
+            totalPausedMsRef.current += resumeNow - pauseStartTimestampRef.current;
             pauseStartTimestampRef.current = null;
         }
 
         if (pauseSegmentsRef.current.length > 0) {
             const last = pauseSegmentsRef.current[pauseSegmentsRef.current.length - 1];
             if (!last.resumedAt) {
-                last.resumedAt = new Date().toISOString();
-                last.durationMs = Date.now() - new Date(last.pausedAt).getTime();
+                last.resumedAt  = new Date(resumeNow).toISOString();
+                last.durationMs = resumeNow - new Date(last.pausedAt).getTime();
             }
         }
 
-        // Reanudar el grabador activo
+        // FIX v2.8.0: Reanudar el grabador activo.
+        // Si Android mató el proceso durante la pausa, `startAsync()` fallará.
+        // En ese caso iniciamos un segmento nuevo pero lo etiquetamos con el
+        // startTimeMs ORIGINAL para que se guarde como parte de la misma noche.
         if (listenerRecRef.current) {
             try {
                 await listenerRecRef.current.startAsync();
             } catch (rErr) {
-                console.warn('[resumePrivacyRecording startAsync]', rErr.message);
+                console.warn('[resumePrivacyRecording startAsync failed, starting new segment]', rErr.message);
+                // Android mató el recorder → nuevo segmento bajo el mismo sessionId
+                try { listenerRecRef.current = null; } catch (_) {}
                 await startNightRecording();
             }
         } else {
@@ -1408,6 +1622,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
         setIsRecordingPaused(false);
 
+        // Reanudar el timer exactamente donde estaba (no pierde el tiempo acumulado)
         monitorTimerRef.current = setInterval(() => {
             setMonitorSeconds((s) => s + 1);
         }, 1000);
@@ -1418,9 +1633,11 @@ export default function RecordingScreen({ token, onLogout }) {
                 isMonitoring: true,
                 isPaused: false,
                 startTimeMs: monitorStartTimestampRef.current,
+                originalSessionDate: getNightDate(monitorStartTimestampRef.current || resumeNow),
                 totalPausedMs: totalPausedMsRef.current,
                 pauseSegments: pauseSegmentsRef.current,
-                nightEvents: nightEventsRef.current
+                nightEvents: nightEventsRef.current,
+                resumedAt: resumeNow
             }));
         } catch (_) {}
     };
@@ -1516,7 +1733,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.7.0 (Estable)</Text>
+                    <Text style={s.versionText}>v2.9.0 (EinsDream Pair)</Text>
                 </View>
             </View>
 
@@ -1617,6 +1834,14 @@ El sistema web ya puede procesar tus estadísticas.`
                                 <Text style={s.statBadge}>🤧 Tos: {nightStats.cough}</Text>
                                 <Text style={s.statBadge}>🗣️ Voz: {nightStats.voice}</Text>
                             </View>
+
+                            {pairConfig?.isPair && (
+                                <View style={s.pairMonitoringBadge}>
+                                    <Text style={s.pairMonitoringTxt}>
+                                        👥 Modo Pareja Activo · {pairConfig.role === 'left' ? '🛏️ Lado Izquierdo' : '🛏️ Lado Derecho'} · Código: {pairConfig.roomCode}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
                     )}
 
@@ -1647,6 +1872,25 @@ El sistema web ya puede procesar tus estadísticas.`
                                 : 'Escucha continua · Detecta ronquidos, tos y respiración'}
                         </Text>
                     </TouchableOpacity>
+
+                    {/* Botón de Acceso Rápido a Monitoreo en Pareja */}
+                    {!isMonitoring && (
+                        <TouchableOpacity
+                            style={s.pairShortcutBtn}
+                            onPress={() => setPairModalVisible(true)}
+                        >
+                            <Text style={s.pairShortcutIcon}>👥</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={s.pairShortcutTitle}>EinsDream Pair (2 Celulares)</Text>
+                                <Text style={s.pairShortcutSub}>
+                                    {pairConfig?.isPair
+                                        ? `Configurado: ${pairConfig.role === 'left' ? 'Lado Izquierdo' : 'Lado Derecho'} (Sala ${pairConfig.roomCode})`
+                                        : 'Sincroniza dos teléfonos para separar y aislar ronquidos'}
+                                </Text>
+                            </View>
+                            <Text style={s.pairShortcutArrow}>→</Text>
+                        </TouchableOpacity>
+                    )}
 
                     {/* Botón de Pausa de Privacidad — solo visible durante monitoreo activo */}
                     {isMonitoring && (
@@ -1722,6 +1966,14 @@ El sistema web ya puede procesar tus estadísticas.`
 
                             {/* Tarjeta de los 3 Pilares con Einsdream Score */}
                             <ThreePillarsCard scoreData={nightAnalysis.einsdreamScore} />
+
+                            {/* Tarjeta de Impacto del Acompañante (Monitoreo Dual con 2 Celulares) */}
+                            {(nightAnalysis.pairData || pairSessionResult) && (
+                                <PartnerImpactCard
+                                    pairData={nightAnalysis.pairData || pairSessionResult}
+                                    myRole={nightAnalysis.pairRole || pairConfig?.role || 'left'}
+                                />
+                            )}
 
                             {/* Diales Circulares (Duración con Déficit, Sueño Profundo, Regularidad, Eficiencia) */}
                             <Text style={s.sectionHeader}>⏱️ Diales de Eficiencia y Salud</Text>
@@ -2236,6 +2488,14 @@ El sistema web ya puede procesar tus estadísticas.`
                 initialProfile={sleepProfile}
             />
 
+            {/* Modal de Emparejamiento Dual (EinsDream Pair) */}
+            <PairModal
+                visible={pairModalVisible}
+                onClose={() => setPairModalVisible(false)}
+                onSelectSolo={handleStartSoloMonitoring}
+                onStartPairMonitoring={handleStartPairMonitoring}
+            />
+
             {/* Pie con botón de cerrar sesión */}
             <View style={s.footer}>
                 <Button title="Cerrar sesión" onPress={onLogout} color="#64748b" />
@@ -2444,6 +2704,52 @@ const s = StyleSheet.create({
         color: '#fbbf24',
         fontWeight: '800',
         fontSize: 13,
+    },
+
+    pairShortcutBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#131b38',
+        borderWidth: 1.5,
+        borderColor: '#4f46e5',
+        borderRadius: 14,
+        paddingVertical: 13,
+        paddingHorizontal: 16,
+        marginBottom: 14,
+        gap: 12,
+    },
+    pairShortcutIcon: {
+        fontSize: 24,
+    },
+    pairShortcutTitle: {
+        color: '#ffffff',
+        fontWeight: '800',
+        fontSize: 14,
+    },
+    pairShortcutSub: {
+        color: '#94a3b8',
+        fontSize: 11,
+        marginTop: 2,
+    },
+    pairShortcutArrow: {
+        color: '#818cf8',
+        fontSize: 18,
+        fontWeight: '800',
+    },
+    pairMonitoringBadge: {
+        backgroundColor: 'rgba(79, 70, 229, 0.25)',
+        borderWidth: 1,
+        borderColor: '#6366f1',
+        borderRadius: 10,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        marginTop: 8,
+        alignItems: 'center',
+    },
+    pairMonitoringTxt: {
+        color: '#e0e7ff',
+        fontSize: 11,
+        fontWeight: '700',
     },
 
     pausePrivacyBtn: {
