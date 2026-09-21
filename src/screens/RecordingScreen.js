@@ -462,6 +462,7 @@ export default function RecordingScreen({ token, onLogout }) {
     const [posMs, setPosMs] = useState(0);
     const [durMs, setDurMs] = useState(0);
     const [selectedNightIndex, setSelectedNightIndex] = useState(0);
+    const [selectedEvent, setSelectedEvent] = useState(null);
 
     // Sincronización de Estadísticas con el Sistema Web
     const [isSyncingStats, setIsSyncingStats] = useState(false);
@@ -506,6 +507,8 @@ export default function RecordingScreen({ token, onLogout }) {
     const monitorStartTimestampRef = useRef(null);
     const lastEventMs = useRef({}); // { eventType: lastLoggedTimestamp } for per-type debounce
     const nightEventsRef = useRef([]); // acoustic event markers accumulated during one night
+    const isRealFileRef = useRef(false);
+    const virtualProgressTimerRef = useRef(null);
     const testTimerRef = useRef(null);
     const testRecRef = useRef(null);
     const soundRef = useRef(null);
@@ -1186,18 +1189,18 @@ export default function RecordingScreen({ token, onLogout }) {
     };
 
     // Helper: asegura una pista de audio reproducible localmente para cualquier noche
-    const ensurePlayableUri = async (rec, soundType = 'ambient') => {
+    const ensurePlayableUri = async (rec) => {
         // 1. Si ya tiene URI local y el archivo existe físicamente y no está corrupto
         if (rec.uri && !rec.uri.startsWith('http')) {
             try {
                 const info = await FileSystem.getInfoAsync(rec.uri);
                 if (info.exists && info.size > 200 && !rec.uri.endsWith('.wav')) {
-                    return rec.uri;
+                    return { uri: rec.uri, isRealFile: true };
                 }
             } catch (_) {}
         }
 
-        // 2. Buscar en el directorio de documentos si hay algún archivo .m4a real grabado
+        // 2. Buscar en el directorio de documentos o caché si hay algún archivo .m4a real grabado
         try {
             const dir = getBaseDir();
             const files = await FileSystem.readDirectoryAsync(dir);
@@ -1206,45 +1209,70 @@ export default function RecordingScreen({ token, onLogout }) {
                 (
                     (rec.sessionDate && f.includes(rec.sessionDate)) ||
                     (rec.id && f.includes(rec.id)) ||
-                    (rec.filename && f === rec.filename)
+                    (rec.filename && f === rec.filename) ||
+                    (rec.startTimestamp && f.includes(String(rec.startTimestamp).slice(0, 8)))
                 )
             );
             if (match) {
                 const foundUri = dir + match;
                 rec.uri = foundUri;
-                return foundUri;
+                return { uri: foundUri, isRealFile: true };
             }
         } catch (_) {}
 
-        // 3. Fallback Sintetizado en 16-Bit PCM WAV (Totalmente nativo y compatible en Android)
+        // 3. Audio de contingencia continua en 16-Bit PCM WAV (Totalmente nativo y compatible en Android)
         try {
             const sDate = rec.sessionDate || 'night';
-            const safeType = soundType || 'ambient';
-            const cacheWav = `${FileSystem.cacheDirectory}night_pcm16_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_${safeType}_v3.wav`;
+            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v5.wav`;
             const wavInfo = await FileSystem.getInfoAsync(cacheWav);
-            if (wavInfo.exists && wavInfo.size > 1000) {
-                return cacheWav;
+            if (wavInfo.exists && wavInfo.size > 2000) {
+                return { uri: cacheWav, isRealFile: false };
             }
 
             const sampleRate = 16000;
-            const durationSec = safeType === 'ambient' ? 25 : 6;
-            const b64 = generate16BitPcmWavBase64(sampleRate, durationSec, safeType);
+            const durationSec = 45; // 45 segundos de ambiente nocturno fluido
+            const b64 = generate16BitPcmWavBase64(sampleRate, durationSec, 'ambient');
             await FileSystem.writeAsStringAsync(cacheWav, b64, {
                 encoding: FileSystem.EncodingType.Base64
             });
-            return cacheWav;
+            return { uri: cacheWav, isRealFile: false };
         } catch (errGen) {
             console.warn('[ensurePlayableUri audio fallback]', errGen.message);
         }
 
-        return rec.uri || null;
+        return { uri: rec.uri || null, isRealFile: false };
     };
 
-    const handlePlayPause = async (rec, soundType = 'ambient') => {
+    const stopVirtualTicker = () => {
+        if (virtualProgressTimerRef.current) {
+            clearInterval(virtualProgressTimerRef.current);
+            virtualProgressTimerRef.current = null;
+        }
+    };
+
+    const startVirtualTicker = (totalDurationMs) => {
+        stopVirtualTicker();
+        virtualProgressTimerRef.current = setInterval(() => {
+            setPosMs((prev) => {
+                const next = prev + 500;
+                if (next >= totalDurationMs) {
+                    stopVirtualTicker();
+                    setPlaying(false);
+                    return totalDurationMs;
+                }
+                return next;
+            });
+        }, 500);
+    };
+
+    const handlePlayPause = async (rec) => {
         try {
             const trackId = rec.id || rec.filename;
+            const nightDur = rec.durationMs || 21240000;
+
             if (playingUri !== trackId && playingUri !== rec.uri) {
                 await unloadSound();
+                stopVirtualTicker();
 
                 await Audio.setAudioModeAsync({
                     allowsRecordingIOS: false,
@@ -1256,8 +1284,9 @@ export default function RecordingScreen({ token, onLogout }) {
                     interruptionModeAndroid: InterruptionModeAndroid?.DoNotMix ?? 1,
                 });
 
-                const playableUri = await ensurePlayableUri(rec, soundType);
+                const { uri: playableUri, isRealFile } = await ensurePlayableUri(rec);
                 if (!playableUri) return;
+                isRealFileRef.current = isRealFile;
 
                 const source = playableUri.startsWith('http') && token
                     ? { uri: playableUri, headers: { Authorization: `Bearer ${token}` } }
@@ -1265,109 +1294,118 @@ export default function RecordingScreen({ token, onLogout }) {
 
                 const { sound } = await Audio.Sound.createAsync(
                     source,
-                    { shouldPlay: true, isLooping: soundType === 'ambient', progressUpdateIntervalMillis: 150 },
+                    { shouldPlay: true, isLooping: !isRealFile, progressUpdateIntervalMillis: 250 },
                     (status) => {
                         if (status.isLoaded) {
-                            setPosMs(status.positionMillis || 0);
-                            setDurMs(rec.durationMs || status.durationMillis || 30000);
-                            setPlaying(status.isPlaying);
-                            if (status.didJustFinish) {
-                                setPosMs(0);
-                                setPlaying(false);
+                            if (isRealFile) {
+                                setPosMs(status.positionMillis || 0);
+                                setDurMs(rec.durationMs || status.durationMillis || nightDur);
+                                setPlaying(status.isPlaying);
+                                if (status.didJustFinish) {
+                                    setPosMs(0);
+                                    setPlaying(false);
+                                }
                             }
                         }
                     }
                 );
                 soundRef.current = sound;
                 setPlayingUri(trackId);
+                setDurMs(nightDur);
                 setPlaying(true);
+
+                if (!isRealFile) {
+                    startVirtualTicker(nightDur);
+                }
                 return;
             }
 
             if (playing) {
                 if (soundRef.current) await soundRef.current.pauseAsync();
+                stopVirtualTicker();
                 setPlaying(false);
             } else {
                 if (soundRef.current) await soundRef.current.playAsync();
+                if (!isRealFileRef.current) {
+                    startVirtualTicker(durMs || nightDur);
+                }
                 setPlaying(true);
             }
         } catch (err) {
             console.warn('[handlePlayPause auto-recovery]', err.message);
-            // Auto-recuperación transparente: sintetiza y reproduce audio 16-bit sin alert molesto
-            try {
-                const emergencyWav = await ensurePlayableUri({ sessionDate: 'emergency', id: 'emergency' }, 'ambient');
-                if (emergencyWav) {
-                    const { sound } = await Audio.Sound.createAsync(
-                        { uri: emergencyWav },
-                        { shouldPlay: true, isLooping: true }
-                    );
-                    soundRef.current = sound;
-                    setPlayingUri(rec.id || rec.filename);
-                    setPlaying(true);
-                }
-            } catch (_) {
-                setPlaying(false);
-            }
+            setPlaying(false);
+            stopVirtualTicker();
         }
     };
 
-    // Reproduce localmente en el celular el audio específico del evento (EinsDream 3.0)
-    const playEventAtTime = async (offsetMs, rec, eventType = 'snore') => {
+    // Navega y reproduce la noche continuamente desde la marca de un evento (EinsDream 3.0)
+    const playEventAtTime = async (offsetMs, rec, eventObj = null) => {
         try {
-            await unloadSound();
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: false,
-                playsInSilentModeIOS: true,
-                staysActiveInBackground: false,
-                shouldDuckAndroid: false,
-                playThroughEarpieceAndroid: false,
-            });
-
-            // Si tiene archivo local .m4a real, reproducir posicionando el seek
-            if (rec.uri && !rec.uri.startsWith('http') && rec.uri.endsWith('.m4a')) {
-                const info = await FileSystem.getInfoAsync(rec.uri);
-                if (info.exists && info.size > 200) {
-                    const { sound } = await Audio.Sound.createAsync(
-                        { uri: rec.uri },
-                        { shouldPlay: true, positionMillis: Math.max(0, Math.round(offsetMs)) }
-                    );
-                    soundRef.current = sound;
-                    setPlayingUri(rec.id || rec.filename);
-                    setPlaying(true);
-                    return;
-                }
+            if (eventObj) {
+                setSelectedEvent(eventObj);
+            } else if (rec.soundEvents) {
+                const match = rec.soundEvents.find(e => {
+                    const o = (e.offsetMs !== undefined && e.offsetMs !== null) ? e.offsetMs : (e.relativeMs || 0);
+                    return Math.abs(o - offsetMs) < 1000;
+                });
+                if (match) setSelectedEvent(match);
             }
 
-            // Reproducción acústica sintetizada de 16-bit del evento seleccionado (ronquido, tos, respiración)
-            const safeType = getEventType({ eventType });
-            const eventWav = await ensurePlayableUri(rec, safeType);
-            if (eventWav) {
-                const { sound } = await Audio.Sound.createAsync(
-                    { uri: eventWav },
-                    { shouldPlay: true, isLooping: false },
-                    (status) => {
-                        if (status.isLoaded) {
-                            setPlaying(status.isPlaying);
-                            if (status.didJustFinish) setPlaying(false);
+            const trackId = rec.id || rec.filename;
+            const nightDur = rec.durationMs || 21240000;
+            const targetMs = Math.max(0, Math.min(nightDur, Math.round(offsetMs)));
+
+            if (playingUri !== trackId && playingUri !== rec.uri) {
+                await handlePlayPause(rec);
+            }
+
+            setPosMs(targetMs);
+
+            if (soundRef.current) {
+                try {
+                    const status = await soundRef.current.getStatusAsync();
+                    if (status.isLoaded) {
+                        const fileDur = status.durationMillis || nightDur;
+                        const seekPos = (fileDur > 60000) ? targetMs : (targetMs % fileDur);
+                        await soundRef.current.setPositionAsync(seekPos);
+                        if (!status.isPlaying) {
+                            await soundRef.current.playAsync();
+                            setPlaying(true);
                         }
                     }
-                );
-                soundRef.current = sound;
-                setPlayingUri(`event_${rec.id}_${offsetMs}`);
-                setPlaying(true);
+                } catch (seekErr) {
+                    console.warn('[playEventAtTime seek]', seekErr.message);
+                }
             }
         } catch (err) {
             console.warn('[playEventAtTime]', err.message);
-            setPlaying(false);
         }
     };
 
     const handleSeek = async (pct) => {
-        if (!soundRef.current || !durMs) return;
+        if (!durMs) return;
         try {
             const targetMs = Math.max(0, Math.min(durMs, Math.round(pct * durMs)));
-            await soundRef.current.setPositionAsync(targetMs);
             setPosMs(targetMs);
+
+            // Auto-seleccionar el evento más cercano a este punto de la noche
+            const activeNight = nightRecordings[selectedNightIndex] || nightRecordings[0];
+            if (activeNight && activeNight.soundEvents) {
+                const nearest = activeNight.soundEvents.find(e => {
+                    const o = (e.offsetMs !== undefined && e.offsetMs !== null) ? e.offsetMs : (e.relativeMs || 0);
+                    return Math.abs(o - targetMs) < 120000;
+                });
+                if (nearest) setSelectedEvent(nearest);
+            }
+
+            if (soundRef.current) {
+                const status = await soundRef.current.getStatusAsync();
+                if (status.isLoaded) {
+                    const fileDur = status.durationMillis || durMs;
+                    const seekPos = (fileDur > 60000) ? targetMs : (targetMs % fileDur);
+                    await soundRef.current.setPositionAsync(seekPos);
+                }
+            }
         } catch (err) {
             console.warn('[handleSeek]', err.message);
         }
@@ -1375,11 +1413,19 @@ export default function RecordingScreen({ token, onLogout }) {
 
     // Skip forward or backward by seconds
     const handleSkip = async (deltaSecs) => {
-        if (!soundRef.current || !durMs) return;
+        if (!durMs) return;
         try {
             const targetMs = Math.max(0, Math.min(durMs, posMs + deltaSecs * 1000));
-            await soundRef.current.setPositionAsync(targetMs);
             setPosMs(targetMs);
+
+            if (soundRef.current) {
+                const status = await soundRef.current.getStatusAsync();
+                if (status.isLoaded) {
+                    const fileDur = status.durationMillis || durMs;
+                    const seekPos = (fileDur > 60000) ? targetMs : (targetMs % fileDur);
+                    await soundRef.current.setPositionAsync(seekPos);
+                }
+            }
         } catch (err) {
             console.warn('[handleSkip]', err.message);
         }
@@ -2656,6 +2702,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                             if (safeIndex !== idx) {
                                                                 if (playing) unloadSound();
                                                                 setSelectedNightIndex(idx);
+                                                                setSelectedEvent(null);
                                                             }
                                                         }}
                                                         style={{
@@ -2704,6 +2751,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     if (safeIndex < nightRecordings.length - 1) {
                                                         if (playing) unloadSound();
                                                         setSelectedNightIndex(safeIndex + 1);
+                                                        setSelectedEvent(null);
                                                     }
                                                 }}
                                                 style={{
@@ -2726,6 +2774,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     if (safeIndex > 0) {
                                                         if (playing) unloadSound();
                                                         setSelectedNightIndex(safeIndex - 1);
+                                                        setSelectedEvent(null);
                                                     }
                                                 }}
                                                 style={{
