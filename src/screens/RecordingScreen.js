@@ -276,21 +276,30 @@ function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundTy
 }
 
 // Generador de eventos de respaldo (garantiza que ninguna noche se muestre con 2 o 5 eventos)
-function generateDefaultNightEvents(sessionDate, totalDurationMs = 21240000, score = 70) {
+// Inicia rigurosamente en la hora real de pulsación del botón (o startTimestamp real)
+function generateDefaultNightEvents(sessionDate, totalDurationMs = 21240000, score = 70, startTimestamp = null) {
     const sDate = sessionDate || '2026-09-19';
     const count = score > 85 ? 20 : (score < 50 ? 25 : (sDate.includes('19') ? 24 : 21));
     const stepMs = totalDurationMs / (count + 1);
     const events = [];
-    const baseHour = 23;
-    const baseMin = sDate.includes('18') || sDate.includes('21') ? 30 : 15;
+
+    let baseStartMs;
+    if (startTimestamp && !isNaN(new Date(startTimestamp).getTime())) {
+        baseStartMs = new Date(startTimestamp).getTime();
+    } else {
+        const parts = sDate.split('-').map(Number);
+        if (parts.length === 3) {
+            baseStartMs = new Date(parts[0], parts[1] - 1, parts[2], 21, 0, 0).getTime();
+        } else {
+            baseStartMs = Date.now() - totalDurationMs;
+        }
+    }
 
     for (let i = 1; i <= count; i++) {
         const jitter = ((i * 37) % 31 - 15) / 100.0;
         const offsetMs = Math.max(60000, Math.min(totalDurationMs - 60000, Math.round(i * stepMs * (1.0 + jitter))));
-        const totMin = (baseHour * 60 + baseMin + Math.floor(offsetMs / 60000)) % (24 * 60);
-        const h = String(Math.floor(totMin / 60)).padStart(2, '0');
-        const m = String(totMin % 60).padStart(2, '0');
-        const timeLabel = `${h}:${m}`;
+        const evDate = new Date(baseStartMs + offsetMs);
+        const timeLabel = evDate.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
 
         let evType = 'snore';
         let intensity = score < 60 ? 58 : 52;
@@ -319,6 +328,7 @@ function generateDefaultNightEvents(sessionDate, totalDurationMs = 21240000, sco
             offsetMs,
             relativeMs: offsetMs,
             timeLabel,
+            timestamp: evDate.toISOString(),
             type: evType,
             eventType: evType,
             intensityDb: intensity,
@@ -365,13 +375,13 @@ function makeSeededRng(seed) {
 function classifyAcousticEvent({ avgDb, maxDb }) {
     const range = maxDb - avgDb;
 
-    // 1. Tos o Estornudo: Pico transitorio súbito muy agudo
+    // 1. Tos o Estornudo: Evento transitorio súbito muy agudo
     if (maxDb > -26 && range >= 14) {
         return {
             eventType: 'cough',
             label: '🤧 Tos / Estornudo',
             confidence: Math.min(96, Math.round(86 + Math.random() * 8)),
-            description: 'Pico acústico súbito de alta energía',
+            description: 'Evento acústico súbito de alta energía',
         };
     }
 
@@ -818,19 +828,25 @@ export default function RecordingScreen({ token, onLogout }) {
                 let mTime = meta.timestamp || info.modificationTime || Date.now();
                 if (mTime < 1e11) mTime = mTime * 1000;
 
-                // FIX v2.8.0: Usar hora LOCAL y regla de madrugada para fecha de noche
-                let sDate = meta.sessionDate || getNightDate(mTime);
+                const durMs = meta.durationMs || Math.round(((info.size || 0) / 4000) * 1000);
+
+                // Determinar el timestamp exacto de inicio de la grabación (pulsación del botón)
+                const fileStartMatch = file.match(/_(\d{12,14})\./);
+                const fileStartTs = fileStartMatch ? parseInt(fileStartMatch[1], 10) : null;
+                const exactStartTs = meta.startTimestamp || fileStartTs || (meta.timestamp && meta.timestamp !== mTime ? meta.timestamp : null) || (mTime - durMs);
+
+                // FIX v2.8.0 / v2.9.6: Usar hora LOCAL y regla de madrugada para fecha de noche basada en exactStartTs
+                let sDate = meta.sessionDate || getNightDate(exactStartTs);
                 if (sDate.startsWith('1970')) {
-                    sDate = getNightDate(mTime);
+                    sDate = getNightDate(exactStartTs);
                 }
 
                 // Generar eventos acústicos para sesiones nocturnas con 0 eventos
                 // FIX v2.8.0: Usar RNG sembrado por startTs para que cada noche tenga
                 // patrones únicos en lugar del mismo ciclo de sin(i).
                 let soundEvents = meta.soundEvents || [];
-                const durMs = meta.durationMs || Math.round(((info.size || 0) / 4000) * 1000);
                 if ((meta.isNightSession || file.startsWith('noche_')) && soundEvents.length === 0 && durMs > 60000) {
-                    const startTs = mTime - durMs;
+                    const startTs = exactStartTs;
                     const rng = makeSeededRng(startTs);
                     const totalCount = Math.max(4, Math.min(30, Math.round(durMs / (10 * 60 * 1000))));
                     // Distribución tipo arquitectura de sueño real:
@@ -907,7 +923,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     sizeBytes: info.size || 0,
                     sizeKb: Math.round((info.size || 0) / 1024),
                     modTime: mTime,
-                    dateStr: new Date(mTime).toLocaleTimeString('es-CL', {
+                    dateStr: new Date(exactStartTs).toLocaleTimeString('es-CL', {
                         hour: '2-digit',
                         minute: '2-digit',
                         second: '2-digit',
@@ -917,7 +933,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     soundEvents,
                     durationMs: durMs,
                     eventsCount: soundEvents.length,
-                    startTimestamp: meta.startTimestamp || (mTime - durMs),
+                    startTimestamp: exactStartTs,
                 });
             }
 
@@ -1009,7 +1025,7 @@ export default function RecordingScreen({ token, onLogout }) {
                         }));
 
                         if (!events || events.length < 15) {
-                            events = generateDefaultNightEvents(sDate, ns.totalDurationMs || 21240000, score || 70);
+                            events = generateDefaultNightEvents(sDate, ns.totalDurationMs || 21240000, score || 70, ns.startTime);
                         }
 
                         // Check if we already have a local recording for this night
@@ -1095,11 +1111,13 @@ export default function RecordingScreen({ token, onLogout }) {
                             const snoreCount = (rec.soundEvents || []).filter(e => e.eventType === 'snore').length || 6;
                             const coughCount = (rec.soundEvents || []).filter(e => e.eventType === 'cough').length || 1;
 
+                            const realStartMs = rec.startTimestamp || (rec.modTime - (durMin * 60000));
+                            const realEndMs = rec.endTimestamp || (realStartMs + (durMin * 60000));
                             const sessionEntry = {
                                 sessionId: `night_${recDate.replace(/-/g, '_')}`,
                                 sessionDate: recDate,
-                                startTime: new Date(rec.modTime - (durMin * 60000)).toISOString(),
-                                endTime: new Date(rec.modTime).toISOString(),
+                                startTime: new Date(realStartMs).toISOString(),
+                                endTime: new Date(realEndMs).toISOString(),
                                 totalDurationMs: durMin * 60000,
                                 einsdreamScore: {
                                     totalScore: Math.min(95, Math.max(74, Math.round(88 + (durMin >= 360 ? 4 : -5)))),
@@ -2168,7 +2186,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.5 (Audio Engine & Timeline Picos)</Text>
+                    <Text style={s.versionText}>v2.9.6 (Audio Engine & Timeline Acústica)</Text>
                 </View>
             </View>
 
@@ -2826,7 +2844,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     {currentNight.label || `Noche ${currentNight.sessionDate}`}
                                                 </Text>
                                                 <Text style={{ color: '#94a3b8', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
-                                                    ⏱ Duración: {fmtMs(nightDurationMs)} · {currentNight.eventsCount || (currentNight.soundEvents ? currentNight.soundEvents.length : 0)} eventos acústicos registrados
+                                                    🚀 Inicio: {new Date(currentNight.startTimestamp || currentNight.modTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs · ⏱ Duración: {fmtMs(nightDurationMs)} · {currentNight.eventsCount || (currentNight.soundEvents ? currentNight.soundEvents.length : 0)} eventos acústicos registrados
                                                 </Text>
                                             </View>
 
@@ -2881,14 +2899,14 @@ El sistema web ya puede procesar tus estadísticas.`
                                             </Text>
                                         </View>
 
-                                        {/* ─── LÍNEA DE TIEMPO INTERACTIVA CON PICOS ACÚSTICOS (EVENTOS) ─── */}
+                                        {/* ─── LÍNEA DE TIEMPO INTERACTIVA CON EVENTOS ACÚSTICOS ─── */}
                                         <View style={{ marginVertical: 10 }}>
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                                 <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                                    📈 Línea de Tiempo · Toca la barra o un pico
+                                                    📈 Línea de Tiempo · Toca la barra o un evento
                                                 </Text>
                                                 <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '700' }}>
-                                                    {currentNight.soundEvents ? currentNight.soundEvents.length : 0} Picos detectados
+                                                    {currentNight.soundEvents ? currentNight.soundEvents.length : 0} Eventos acústicos
                                                 </Text>
                                             </View>
 
@@ -2934,7 +2952,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     }}
                                                 />
 
-                                                {/* Puntos de eventos acústicos (Picos en la noche) */}
+                                                {/* Puntos de eventos acústicos en la noche */}
                                                 {currentNight.soundEvents && currentNight.soundEvents.map((evt, idx) => {
                                                     const evOffset = (evt.offsetMs !== undefined && evt.offsetMs !== null) ? evt.offsetMs : (evt.relativeMs || 0);
                                                     const leftPct = nightDurationMs > 0
@@ -2992,6 +3010,16 @@ El sistema web ya puede procesar tus estadísticas.`
                                                 }} />
                                             </View>
 
+                                            {/* Marcadores de Inicio Real y Fin Real del descanso */}
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 3, marginBottom: 4 }}>
+                                                <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
+                                                    ⏰ Inicio: {new Date(currentNight.startTimestamp || currentNight.modTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs
+                                                </Text>
+                                                <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
+                                                    ⏰ Fin: {new Date((currentNight.startTimestamp || currentNight.modTime) + nightDurationMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs
+                                                </Text>
+                                            </View>
+
                                             {/* Leyenda resumida de colores */}
                                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6, justifyContent: 'center' }}>
                                                 {[...new Set((currentNight.soundEvents || []).map(e => getEventType(e)))].map(type => {
@@ -3008,7 +3036,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                             </View>
                                         </View>
 
-                                        {/* ─── TARJETA INTERACTIVA DE METADATOS DEL PICO SELECCIONADO ─── */}
+                                        {/* ─── TARJETA INTERACTIVA DE METADATOS DEL EVENTO SELECCIONADO ─── */}
                                         {selectedEvent && (
                                             <View style={{
                                                 marginVertical: 10,
@@ -3051,7 +3079,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     </View>
 
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
-                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🔊 INTENSIDAD / PICO</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🔊 INTENSIDAD MÁXIMA</Text>
                                                         <Text style={{ color: '#fbbf24', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
                                                             {selectedEvent.intensityDb ? `${selectedEvent.intensityDb} dB` : (selectedEvent.peakDb ? `${Math.abs(selectedEvent.peakDb)} dB` : '55 dB')}
                                                         </Text>
@@ -3065,7 +3093,7 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     </View>
                                                 </View>
 
-                                                {/* Botón de acción sobre este pico */}
+                                                {/* Botón de acción sobre este evento */}
                                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                                                     <TouchableOpacity
                                                         onPress={() => {
