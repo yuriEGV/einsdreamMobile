@@ -116,7 +116,10 @@ export function evaluateEinsdreamScore({
 
     const deficitMinutes = actualSleepMinutes - targetSleepMinutes;
     const durPenalty = Math.abs(deficitMinutes);
-    const durationScore = Math.max(10, Math.min(100, Math.round(100 - durPenalty * 0.42)));
+    let durationScore = Math.max(10, Math.min(100, Math.round(100 - durPenalty * 0.42)));
+    if (actualSleepMinutes < 300) {
+        durationScore = Math.min(60, Math.max(15, Math.round((actualSleepMinutes / targetSleepMinutes) * 100)));
+    }
 
     const deepRatio = actualSleepMinutes > 0 ? (deepSleepMinutes / actualSleepMinutes) : 0.20;
     const remRatio = actualSleepMinutes > 0 ? (remSleepMinutes / actualSleepMinutes) : 0.20;
@@ -126,7 +129,14 @@ export function evaluateEinsdreamScore({
     const effScore = Math.min(100, Math.max(20, sleepEfficiency));
     const peaceScore = Math.max(20, Math.min(100, Math.round(100 - snorePercentage * 3.5)));
 
-    const qualityScore = Math.round(deepScore * 0.35 + remScore * 0.25 + effScore * 0.25 + peaceScore * 0.15);
+    let rawQuality = Math.round(deepScore * 0.35 + remScore * 0.25 + effScore * 0.25 + peaceScore * 0.15);
+    // Si durmió menos de 5 horas (<300m) o déficit severo (>120m), la calidad no puede ser alta
+    if (actualSleepMinutes < 300 || deficitMinutes <= -120) {
+        rawQuality = Math.min(52, Math.max(15, rawQuality - 30));
+    } else if (actualSleepMinutes < 390 || deficitMinutes <= -45) {
+        rawQuality = Math.min(75, Math.max(25, rawQuality - 15));
+    }
+    const qualityScore = rawQuality;
 
     const totalScore = Math.min(100, Math.max(10, Math.round(
         0.40 * regularityScore +
@@ -143,14 +153,17 @@ export function evaluateEinsdreamScore({
 
     // 6+ Dimensions
     const dimensions = {
-        duration: Math.min(100, Math.max(15, Math.round((actualSleepMinutes / 480) * 100))),
+        duration: durationScore,
         deepSleep: deepScore,
         regularity: regularityScore,
         efficiency: sleepEfficiency,
         cardioRecovery: Math.min(100, Math.max(20, Math.round(hrvSdann * 0.85 + hrvGain * 0.5))),
         acousticPeace: peaceScore,
-        remSleep: remScore
+        remSleep: remScore,
+        quality: qualityScore
     };
+
+    const maxPeakDb = Math.max(0, ...correlatedEvents.map(e => e.intensityDb || Math.abs(e.peakDb || 0)));
 
     return {
         einsdreamScore: {
@@ -158,6 +171,9 @@ export function evaluateEinsdreamScore({
             regularityScore,
             durationScore,
             qualityScore,
+            regularidadScore: regularityScore,
+            duracionScore: durationScore,
+            calidadScore: qualityScore,
             ratingStars,
             deficitMinutes,
             irregularityMinutes
@@ -174,7 +190,11 @@ export function evaluateEinsdreamScore({
         snoreMetrics: {
             snorePercentage,
             totalSnoreMinutes,
+            snoreDurationMinutes: totalSnoreMinutes,
+            totalSnoreEvents: snoreEvents.length,
             snoreEventsCount: snoreEvents.length,
+            peakSnoreDb: maxPeakDb,
+            maxDb: maxPeakDb,
             coughEventsCount: coughEvents.length,
             irregularityIndex: irregularityMinutes
         },
@@ -255,7 +275,7 @@ export function calculateTrendsBenchmark(sessions = [], baselineProfile = {}) {
     };
 }
 
-function recent14DaysTable(sessions) {
+function recent14DaysTable(sessions, targetSleepMinutes = 480) {
     if (!sessions || sessions.length === 0) return [];
     const list = sessions.slice(0, 14);
     return list.map((s, idx) => {
@@ -272,18 +292,35 @@ function recent14DaysTable(sessions) {
         const durMinutes = s.durationMinutes
             || (s.sleepBreakdown && s.sleepBreakdown.totalMonitoredMinutes)
             || (s.sleepSummary && s.sleepSummary.durationMinutes)
+            || (s.totalDurationMs ? Math.round(s.totalDurationMs / 60000) : 0)
             || 0;
         const h = Math.floor(durMinutes / 60);
         const m = durMinutes % 60;
         const sleepHours = durMinutes > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : '--';
 
-        const eventsCount = s.audioEventsCount !== undefined
-            ? s.audioEventsCount
-            : (Array.isArray(s.audioEvents) ? s.audioEvents.length : 0);
+        // Eventos reales detectados
+        const eventsCount = s.eventsCount !== undefined
+            ? s.eventsCount
+            : (s.soundEvents ? s.soundEvents.length : (s.audioEventsCount !== undefined ? s.audioEventsCount : (Array.isArray(s.audioEvents) ? s.audioEvents.length : 0)));
 
+        // Diferencia vs horas deseadas del usuario (targetSleepMinutes)
+        const diffMinutes = durMinutes - targetSleepMinutes;
+        const diffH = Math.floor(Math.abs(diffMinutes) / 60);
+        const diffM = Math.abs(diffMinutes) % 60;
+        const diffFormatted = `${diffMinutes >= 0 ? '+' : '-'}${diffH}h ${String(diffM).padStart(2, '0')}m`;
+
+        // CALIDAD DEL DESCANSO
+        // Si el descanso es < 5 horas (< 300 min) o el déficit es severo (> 120 min),
+        // LA CALIDAD NO PUEDE SER ÓPTIMA. Se etiqueta como "Insuficiente" o "Deficiente".
         let quality = s.quality;
         if (!quality) {
-            quality = eventsCount === 0 ? 'Óptima' : (eventsCount <= 3 ? 'Tranquila' : (eventsCount <= 6 ? 'Moderada' : 'Interrumpida'));
+            if (durMinutes < 300 || diffMinutes <= -120) {
+                quality = 'Insuficiente';
+            } else if (durMinutes < 390 || diffMinutes <= -30) {
+                quality = eventsCount > 15 ? 'Interrumpida' : (eventsCount > 5 ? 'Moderada' : 'Regular');
+            } else {
+                quality = eventsCount > 15 ? 'Interrumpida' : (eventsCount > 5 ? 'Moderada' : (eventsCount > 0 ? 'Tranquila' : 'Óptima'));
+            }
         }
 
         return {
@@ -291,6 +328,8 @@ function recent14DaysTable(sessions) {
             dayName: dayName.charAt(0).toUpperCase() + dayName.slice(1),
             schedule: scheduleStr,
             sleepHours,
+            diffMinutes,
+            diffFormatted,
             durationMinutes: durMinutes,
             eventsCount,
             quality

@@ -61,7 +61,9 @@ import PartnerImpactCard from '../components/PartnerImpactCard';
 import {
     evaluateEinsdreamScore,
     calculateTrendsBenchmark,
-    predictOptimalBedtime
+    predictOptimalBedtime,
+    dateToHHMM,
+    timeDiffMinutes
 } from '../services/predictiveEngine';
 import { readNightHealthMetrics } from '../services/healthConnect';
 import { processNightEngineCorrelation } from '../services/nightEngine';
@@ -289,7 +291,7 @@ function generateDefaultNightEvents(sessionDate, totalDurationMs = 21240000, sco
     } else {
         const parts = sDate.split('-').map(Number);
         if (parts.length === 3) {
-            baseStartMs = new Date(parts[0], parts[1] - 1, parts[2], 21, 0, 0).getTime();
+            baseStartMs = new Date(parts[0], parts[1] - 1, parts[2], 23, 45, 0).getTime();
         } else {
             baseStartMs = Date.now() - totalDurationMs;
         }
@@ -1108,35 +1110,81 @@ export default function RecordingScreen({ token, onLogout }) {
                         const alreadyInCache = cachedSessions.some(c => c.sessionDate === recDate);
                         if (!alreadyInCache && recDate && !recDate.startsWith('1970')) {
                             const durMin = Math.max(30, Math.round((rec.durationMs || 10800000) / 60000));
-                            const snoreCount = (rec.soundEvents || []).filter(e => e.eventType === 'snore').length || 6;
-                            const coughCount = (rec.soundEvents || []).filter(e => e.eventType === 'cough').length || 1;
+                            const targetMin = sleepProfile?.targetSleepMinutes || 420;
+                            const diffMin = durMin - targetMin;
+                            const snoreCount = (rec.soundEvents || []).filter(e => e.eventType === 'snore' || e.type === 'snore').length || 6;
+                            const coughCount = (rec.soundEvents || []).filter(e => e.eventType === 'cough' || e.type === 'cough').length || 1;
+                            const maxPeakDb = Math.max(0, ...(rec.soundEvents || []).map(e => e.intensityDb || Math.abs(e.peakDb || 0))) || 42;
 
                             const realStartMs = rec.startTimestamp || (rec.modTime - (durMin * 60000));
                             const realEndMs = rec.endTimestamp || (realStartMs + (durMin * 60000));
+
+                            // Cálculo riguroso de los 3 pilares condicionado a horas reales vs meta
+                            let durScore = Math.min(100, Math.max(15, Math.round((durMin / targetMin) * 100)));
+                            if (durMin < 300) {
+                                durScore = Math.min(60, durScore);
+                            }
+
+                            // Regularidad
+                            const startD = new Date(realStartMs);
+                            const startHHMM = dateToHHMM(startD);
+                            const targetBedtime = sleepProfile?.targetBedtime || '00:30';
+                            const regPenalty = Math.abs(timeDiffMinutes(startHHMM, targetBedtime));
+                            const regScore = Math.max(20, Math.min(100, Math.round(100 - regPenalty * 0.35)));
+
+                            // Calidad sujeta al descanso real (si < 5h no puede ser alta)
+                            let calScore = Math.min(100, Math.max(20, Math.round((durScore * 0.6) + Math.max(0, 40 - snoreCount * 1.5))));
+                            if (durMin < 300 || diffMin <= -120) {
+                                calScore = Math.min(52, calScore);
+                            } else if (durMin < 390 || diffMin <= -45) {
+                                calScore = Math.min(75, calScore);
+                            }
+
+                            const totalScore = Math.min(100, Math.max(20, Math.round(0.40 * regScore + 0.30 * durScore + 0.30 * calScore)));
+                            const qualityLabel = (durMin < 300 || diffMin <= -120) ? 'Insuficiente' : (durMin < 390 ? 'Moderada' : 'Óptima');
+
                             const sessionEntry = {
                                 sessionId: `night_${recDate.replace(/-/g, '_')}`,
                                 sessionDate: recDate,
                                 startTime: new Date(realStartMs).toISOString(),
                                 endTime: new Date(realEndMs).toISOString(),
                                 totalDurationMs: durMin * 60000,
-                                einsdreamScore: {
-                                    totalScore: Math.min(95, Math.max(74, Math.round(88 + (durMin >= 360 ? 4 : -5)))),
-                                    regularity: 88,
-                                    efficiency: 92,
-                                    deepSleep: 23,
-                                    remSleep: 24,
+                                einsdreamScore: rec.einsdreamScore || {
+                                    totalScore,
+                                    regularity: regScore,
+                                    regularidadScore: regScore,
+                                    regularityScore: regScore,
+                                    duracionScore: durScore,
+                                    durationScore: durScore,
+                                    calidadScore: calScore,
+                                    qualityScore: calScore,
+                                    efficiency: Math.min(95, Math.max(50, Math.round(durScore * 0.95))),
+                                    deepSleep: Math.min(25, Math.max(10, Math.round(durScore * 0.23))),
+                                    remSleep: Math.min(25, Math.max(10, Math.round(durScore * 0.22))),
                                     lightSleep: 45,
-                                    wakePercent: 8
+                                    wakePercent: 8,
+                                    ratingStars: totalScore >= 85 ? 5 : (totalScore >= 70 ? 4 : (totalScore >= 55 ? 3 : 2))
                                 },
                                 dimensions: {
-                                    duration: Math.min(100, Math.round((durMin / 480) * 100)),
-                                    deepSleep: 84,
-                                    regularity: 88,
-                                    efficiency: 92,
-                                    acousticPeace: Math.max(65, 95 - snoreCount * 2),
+                                    duration: durScore,
+                                    deepSleep: Math.min(95, Math.max(30, Math.round(durScore * 0.85))),
+                                    regularity: regScore,
+                                    efficiency: Math.min(95, Math.max(50, Math.round(durScore * 0.95))),
+                                    acousticPeace: Math.max(40, 95 - snoreCount * 2),
                                     cardioStability: 89,
-                                    oxygenContinuity: 94
+                                    oxygenContinuity: 94,
+                                    quality: calScore
                                 },
+                                snoreMetrics: {
+                                    totalSnoreEvents: snoreCount,
+                                    snoreEventsCount: snoreCount,
+                                    totalSnoreMinutes: Math.round(snoreCount * 2.5),
+                                    snoreDurationMinutes: Math.round(snoreCount * 2.5),
+                                    peakSnoreDb: maxPeakDb,
+                                    maxDb: maxPeakDb,
+                                    snorePercentage: Number(((snoreCount * 2.5 / durMin) * 100).toFixed(1))
+                                },
+                                quality: qualityLabel,
                                 sleepSummary: {
                                     durationMinutes: durMin,
                                     efficiencyPercent: 92,
@@ -2186,7 +2234,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.6 (Audio Engine & Timeline Acústica)</Text>
+                    <Text style={s.versionText}>v2.9.7 (Audio Engine & Sleep Target Accuracy)</Text>
                 </View>
             </View>
 
@@ -2635,9 +2683,16 @@ El sistema web ya puede procesar tus estadísticas.`
                                             <Text style={s.tdSubDate}>{item.date.slice(5)}</Text>
                                         </View>
                                         <Text style={[s.td, { flex: 2.2, fontSize: 11 }]}>{item.schedule}</Text>
-                                        <Text style={[s.td, { flex: 2, fontWeight: '800', color: '#38bdf8' }]}>{item.sleepHours}</Text>
+                                        <View style={{ flex: 2, justifyContent: 'center' }}>
+                                            <Text style={{ fontWeight: '800', color: '#38bdf8', fontSize: 12 }}>{item.sleepHours}</Text>
+                                            {item.diffFormatted ? (
+                                                <Text style={{ fontSize: 10, fontWeight: '700', color: item.diffMinutes >= 0 ? '#34d399' : '#f87171' }}>
+                                                    {item.diffFormatted}
+                                                </Text>
+                                            ) : null}
+                                        </View>
                                         <Text style={[s.td, { flex: 1.8, color: '#f1f5f9' }]}>{item.eventsCount}</Text>
-                                        <Text style={[s.td, { flex: 2, color: item.quality === 'Óptima' || item.quality === 'Tranquila' ? '#34d399' : '#f59e0b' }]}>
+                                        <Text style={[s.td, { flex: 2, fontWeight: '700', color: item.quality === 'Óptima' || item.quality === 'Tranquila' ? '#34d399' : (item.quality === 'Regular' || item.quality === 'Moderada' ? '#f59e0b' : '#f87171') }]}>
                                             {item.quality}
                                         </Text>
                                     </View>
