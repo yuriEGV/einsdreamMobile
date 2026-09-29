@@ -1,3 +1,4 @@
+const NIGHT_AMBIENT_ASSET = require('../../assets/audio/night_ambient.wav');
 import { Buffer } from 'buffer';
 /**
  * RecordingScreen.js - EinsDream 2026 v2.9.0
@@ -1297,10 +1298,11 @@ export default function RecordingScreen({ token, onLogout }) {
 
     // Helper: asegura una pista de audio reproducible localmente para cualquier noche
     const ensurePlayableUri = async (rec) => {
+        // 1. Si ya tiene URI remota que comienza con http
         if (rec.uri && rec.uri.startsWith('http')) {
             return { uri: rec.uri, isRealFile: true };
         }
-        // 1. Si ya tiene URI local y el archivo existe físicamente y no está corrupto
+        // 2. Si ya tiene URI local y el archivo existe físicamente y no está corrupto
         if (rec.uri && !rec.uri.startsWith('http')) {
             try {
                 const info = await FileSystem.getInfoAsync(rec.uri);
@@ -1310,7 +1312,7 @@ export default function RecordingScreen({ token, onLogout }) {
             } catch (_) {}
         }
 
-        // 2. Buscar en el directorio de documentos o caché si hay algún archivo .m4a real grabado
+        // 3. Buscar en el directorio de documentos o caché si hay algún archivo .m4a real grabado
         try {
             const dir = getBaseDir();
             const files = await FileSystem.readDirectoryAsync(dir);
@@ -1330,27 +1332,8 @@ export default function RecordingScreen({ token, onLogout }) {
             }
         } catch (_) {}
 
-        // 3. Audio de contingencia continua en 16-Bit PCM WAV (Totalmente nativo y compatible en Android)
-        try {
-            const sDate = rec.sessionDate || 'night';
-            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v6.wav`;
-            const wavInfo = await FileSystem.getInfoAsync(cacheWav);
-            if (wavInfo.exists && wavInfo.size > 2000) {
-                return { uri: cacheWav, isRealFile: false };
-            }
-
-            const sampleRate = 16000;
-            const durationSec = 45; // 45 segundos de ambiente nocturno fluido
-            const b64 = generate16BitPcmWavBase64(sampleRate, durationSec, 'ambient');
-            await FileSystem.writeAsStringAsync(cacheWav, b64, {
-                encoding: FileSystem.EncodingType.Base64
-            });
-            return { uri: cacheWav, isRealFile: false };
-        } catch (errGen) {
-            console.warn('[ensurePlayableUri audio fallback]', errGen.message);
-        }
-
-        return { uri: rec.uri || null, isRealFile: false };
+        // 4. Activo acústico nativo empaquetado (100% garantizado en Android e iOS, cero fallos)
+        return { asset: NIGHT_AMBIENT_ASSET, isRealFile: false };
     };
 
     const stopVirtualTicker = () => {
@@ -1360,8 +1343,11 @@ export default function RecordingScreen({ token, onLogout }) {
         }
     };
 
-    const startVirtualTicker = (totalDurationMs) => {
+    const startVirtualTicker = (totalDurationMs, startFromMs = null) => {
         stopVirtualTicker();
+        if (startFromMs !== null && startFromMs !== undefined) {
+            setPosMs(startFromMs);
+        }
         virtualProgressTimerRef.current = setInterval(() => {
             setPosMs((prev) => {
                 const next = prev + 500;
@@ -1394,20 +1380,22 @@ export default function RecordingScreen({ token, onLogout }) {
                     interruptionModeAndroid: InterruptionModeAndroid?.DoNotMix ?? 1,
                 });
 
-                const { uri: playableUri, isRealFile } = await ensurePlayableUri(rec);
-                if (!playableUri) return;
-                isRealFileRef.current = isRealFile;
+                const playable = await ensurePlayableUri(rec);
+                if (!playable) return;
+                isRealFileRef.current = playable.isRealFile;
 
-                const source = playableUri.startsWith('http') && token
-                    ? { uri: playableUri, headers: { Authorization: `Bearer ${token}` } }
-                    : { uri: playableUri };
+                const source = playable.asset
+                    ? playable.asset
+                    : (playable.uri && playable.uri.startsWith('http') && token
+                        ? { uri: playable.uri, headers: { Authorization: `Bearer ${token}` } }
+                        : { uri: playable.uri });
 
                 const { sound } = await Audio.Sound.createAsync(
                     source,
-                    { shouldPlay: true, isLooping: !isRealFile, volume: 1.0, isMuted: false, progressUpdateIntervalMillis: 250 },
+                    { shouldPlay: true, isLooping: !playable.isRealFile, volume: 1.0, isMuted: false, progressUpdateIntervalMillis: 250 },
                     (status) => {
                         if (status.isLoaded) {
-                            if (isRealFile) {
+                            if (playable.isRealFile) {
                                 setPosMs(status.positionMillis || 0);
                                 setDurMs(rec.durationMs || status.durationMillis || nightDur);
                                 setPlaying(status.isPlaying);
@@ -1415,6 +1403,8 @@ export default function RecordingScreen({ token, onLogout }) {
                                     setPosMs(0);
                                     setPlaying(false);
                                 }
+                            } else {
+                                setPlaying(status.isPlaying);
                             }
                         }
                     }
@@ -1425,8 +1415,8 @@ export default function RecordingScreen({ token, onLogout }) {
                 setDurMs(nightDur);
                 setPlaying(true);
 
-                if (!isRealFile) {
-                    startVirtualTicker(nightDur);
+                if (!playable.isRealFile) {
+                    startVirtualTicker(nightDur, posMs > 0 ? posMs : 0);
                 }
                 return;
             }
@@ -1438,7 +1428,7 @@ export default function RecordingScreen({ token, onLogout }) {
             } else {
                 if (soundRef.current) await soundRef.current.playAsync();
                 if (!isRealFileRef.current) {
-                    startVirtualTicker(durMs || nightDur);
+                    startVirtualTicker(durMs || nightDur, posMs);
                 }
                 setPlaying(true);
             }
@@ -1488,6 +1478,12 @@ export default function RecordingScreen({ token, onLogout }) {
                     console.warn('[playEventAtTime seek]', seekErr.message);
                 }
             }
+
+            // Mantener el avance continuo del reproductor y la barra desde el evento seleccionado
+            if (!isRealFileRef.current) {
+                startVirtualTicker(nightDur, targetMs);
+                setPlaying(true);
+            }
         } catch (err) {
             console.warn('[playEventAtTime]', err.message);
         }
@@ -1518,6 +1514,9 @@ export default function RecordingScreen({ token, onLogout }) {
                     await soundRef.current.setPositionAsync(seekPos);
                 }
             }
+            if (!isRealFileRef.current && playing) {
+                startVirtualTicker(durMs, targetMs);
+            }
         } catch (err) {
             console.warn('[handleSeek]', err.message);
         }
@@ -1537,6 +1536,9 @@ export default function RecordingScreen({ token, onLogout }) {
                     const seekPos = (fileDur > 60000) ? targetMs : (targetMs % fileDur);
                     await soundRef.current.setPositionAsync(seekPos);
                 }
+            }
+            if (!isRealFileRef.current && playing) {
+                startVirtualTicker(durMs, targetMs);
             }
         } catch (err) {
             console.warn('[handleSkip]', err.message);
@@ -2278,7 +2280,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.11 (Audio 100% Funcional)</Text>
+                    <Text style={s.versionText}>v2.9.12 (Audio Nativo & Timeline Sincronizada)</Text>
                 </View>
             </View>
 
