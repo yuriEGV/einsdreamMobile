@@ -1,31 +1,31 @@
-﻿/**
+/**
  * RecordingScreen.js - EinsDream 2026 v2.9.0
  *
  * Sistema Inteligente de Monitoreo Nocturno, EinsDream Pair (Dual Celulares) y Motor Einsdream Score
  *
- * PESTAÃ‘AS Y FUNCIONALIDADES:
- * 1. ðŸŒ™ Monitoreo & EinsDream Pair:
+ * PESTAÑAS Y FUNCIONALIDADES:
+ * 1. 🌙 Monitoreo & EinsDream Pair:
  *    - Monitoreo individual o en pareja (2 celulares sincronizados).
- *    - TriangulaciÃ³n acÃºstica (TDOA + Delta dB) para aislar ronquidos del usuario vs acompaÃ±ante.
+ *    - Triangulación acústica (TDOA + Delta dB) para aislar ronquidos del usuario vs acompañante.
  *    - Escucha silenciosa con VAD y medidor de decibelios en vivo.
- *    - IA AcÃºstica On-Device (clasificaciÃ³n de ronquido, tos, respiraciÃ³n, voz, movimiento).
- *    - Prueba rÃ¡pida de 5 segundos con auto-reproducciÃ³n inmediata.
- *    - Memoria protegida de 500 MB con polÃ­tica FIFO.
- * 2. ðŸ“Š Einsdream Score & Dimensiones:
+ *    - IA Acústica On-Device (clasificación de ronquido, tos, respiración, voz, movimiento).
+ *    - Prueba rápida de 5 segundos con auto-reproducción inmediata.
+ *    - Memoria protegida de 500 MB con política FIFO.
+ * 2. 📊 Einsdream Score & Dimensiones:
  *    - Score Global (0 - 100) sustentado en 3 Pilares con prioridad a la Regularidad (40%).
- *    - Desglose de Impacto del AcompaÃ±ante (correlaciÃ³n cruzada de microdespertares).
- *    - Diales circulares (DuraciÃ³n con dÃ©ficit, SueÃ±o profundo %, Regularidad, Eficiencia %, Paz acÃºstica).
+ *    - Desglose de Impacto del Acompañante (correlación cruzada de microdespertares).
+ *    - Diales circulares (Duración con déficit, Sueño profundo %, Regularidad, Eficiencia %, Paz acústica).
  *    - Balance unificado de 7 Dimensiones del Descanso.
  *    - Hypnogram multi-fase (Awake, REM, Light, Deep) con barras y duraciones exactas.
- *    - ActigrafÃ­a nocturna y traza acÃºstica.
- *    - Monitoreo Cardiovascular: FC media/mÃ­n/mÃ¡x, HRV (SDANN) y HRV Gain (%) al despertar.
- * 3. ðŸ”® PredicciÃ³n & HÃ¡bitos:
- *    - EvaluaciÃ³n Inicial (Sleep Test) para baseline del usuario (cronotipo, metas y hÃ¡bitos).
- *    - Benchmarking de tendencias: 7 y 28 dÃ­as mÃ³viles con variaciones porcentuales (+/- %) vs baseline.
- *    - Tabla de tendencias de 14 dÃ­as (estilo Sleep as Android).
- *    - Modelo de regresiÃ³n predictiva para recomendaciÃ³n de horario Ã³ptimo de sueÃ±o.
- * 4. ðŸŽ§ Grabaciones:
- *    - GestiÃ³n de archivos de audio locales, reproductor y sincronizaciÃ³n en la nube.
+ *    - Actigrafía nocturna y traza acústica.
+ *    - Monitoreo Cardiovascular: FC media/mín/máx, HRV (SDANN) y HRV Gain (%) al despertar.
+ * 3. 🔮 Predicción & Hábitos:
+ *    - Evaluación Inicial (Sleep Test) para baseline del usuario (cronotipo, metas y hábitos).
+ *    - Benchmarking de tendencias: 7 y 28 días móviles con variaciones porcentuales (+/- %) vs baseline.
+ *    - Tabla de tendencias de 14 días (estilo Sleep as Android).
+ *    - Modelo de regresión predictiva para recomendación de horario óptimo de sueño.
+ * 4. 🎧 Grabaciones:
+ *    - Gestión de archivos de audio locales, reproductor y sincronización en la nube.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -75,7 +75,7 @@ import {
 const { API_URL, BASE_URL } = CONFIG;
 const FULL_BASE_URL = BASE_URL || 'https://einsdreambcknd.vercel.app';
 
-// â”€â”€â”€ ConfiguraciÃ³n de Audio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Configuración de Audio ───────────────────────────────────────────────────
 const RECORDING_OPTIONS = {
     isMeteringEnabled: true,
     android: {
@@ -98,7 +98,7 @@ const RECORDING_OPTIONS = {
 };
 
 const NOISE_THRESHOLD_DB   = -48;
-// Night recording: low-bitrate continuous mode (32kbps mono â‰ˆ 86 MB / 6 h)
+// Night recording: low-bitrate continuous mode (32kbps mono ≈ 86 MB / 6 h)
 const NIGHT_RECORDING_OPTIONS = {
     isMeteringEnabled: true,
     android: {
@@ -127,7 +127,7 @@ const PROFILE_FILENAME      = 'einsdream_sleep_profile.json';
 const SESSIONS_CACHE_FILENAME = 'einsdream_sessions_cache.json';
 const DELETED_CLOUD_IDS_FILENAME = 'einsdream_deleted_cloud.json';
 
-// â”€â”€â”€ Helpers de Fecha Local y Noches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helpers de Fecha Local y Noches ──────────────────────────────────────────
 function getLocalDateStr(d = new Date()) {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -142,7 +142,7 @@ function getNightDate(startMs) {
     return getLocalDateStr(d);
 }
 
-// TÃ­tulo de sesiÃ³n nocturna exacto y legible con dÃ­a de la semana segÃºn fecha real
+// Título de sesión nocturna exacto y legible con día de la semana según fecha real
 function formatNightSessionTitle(sessionDate, score, isPair = false, pairRole = null) {
     let dayStr = '';
     if (sessionDate && sessionDate.length >= 10) {
@@ -160,12 +160,12 @@ function formatNightSessionTitle(sessionDate, score, isPair = false, pairRole = 
     }
     const scoreStr = (score !== undefined && score !== null) ? ` (Score: ${score})` : '';
     if (isPair) {
-        return `ðŸ‘¥ Noche en Pareja (${pairRole === 'right' ? 'Der' : 'Izq'}) - ${dayStr}${scoreStr}`;
+        return `👥 Noche en Pareja (${pairRole === 'right' ? 'Der' : 'Izq'}) - ${dayStr}${scoreStr}`;
     }
-    return `ðŸŒ™ Noche del ${dayStr}${scoreStr}`;
+    return `🌙 Noche del ${dayStr}${scoreStr}`;
 }
 
-// NormalizaciÃ³n de tipos de eventos acÃºsticos
+// Normalización de tipos de eventos acústicos
 function getEventType(evt) {
     const raw = String(evt?.eventType || evt?.type || 'snore').toLowerCase();
     if (raw.includes('snore') || raw.includes('ronq')) return 'snore';
@@ -178,33 +178,30 @@ function getEventType(evt) {
 
 function getEventLabel(type) {
     switch (type) {
-        case 'snore': return 'ðŸ˜´ Ronquido';
-        case 'cough': return 'ðŸ¤§ Tos';
-        case 'voice': return 'ðŸ—£ï¸ Voz';
-        case 'breathing': return 'ðŸ« RespiraciÃ³n';
-        case 'movement': return 'ðŸ›ï¸ Movimiento';
-        default: return 'ðŸ˜´ Ronquido';
+        case 'snore': return '😴 Ronquido';
+        case 'cough': return '🤧 Tos';
+        case 'voice': return '🗣️ Voz';
+        case 'breathing': return '🫁 Respiración';
+        case 'movement': return '🛏️ Movimiento';
+        default: return '😴 Ronquido';
     }
 }
 
 function evColor(type) {
     switch (type) {
-        case 'snore': return '#F59E0B';     // Ãmbar / Oro
+        case 'snore': return '#F59E0B';     // Ámbar / Oro
         case 'cough': return '#EF4444';     // Rojo
         case 'breathing': return '#06B6D4'; // Cian
-        case 'movement': return '#8B5CF6';  // PÃºrpura
+        case 'movement': return '#8B5CF6';  // Púrpura
         case 'voice': return '#3B82F6';     // Azul
         default: return '#10B981';          // Esmeralda
     }
 }
 
-// Generador de audio de contingencia y efectos acÃºsticos (PCM 16-bit signed, 16000 Hz, mono WAV Base64)
-// Totalmente compatible con todos los decodificadores Android / MediaPlayer sin errores
-// Generador de audio y efectos acsticos (PCM 16-bit signed, 16000 Hz, mono WAV Base64)
+// Generador de audio de contingencia y efectos acústicos (PCM 16-bit signed, 16000 Hz, mono WAV Base64)
 // Totalmente compatible con todos los decodificadores Android / MediaPlayer sin errores
 function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundType = 'ambient') {
-    const norm = String(soundType || 'ambient').toLowerCase();
-    const numSamples = Math.round(sampleRate * durationSec);
+    const numSamples = sampleRate * durationSec;
     const dataSize = numSamples * 2;
     const totalBytes = 44 + dataSize;
     const u8 = new Uint8Array(totalBytes);
@@ -229,69 +226,36 @@ function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundTy
         const t = i / sampleRate;
         let sample = 0;
 
-        if (norm.includes('snore') || norm.includes('ronquido')) {
-            // Firma acstica de ronquido potente y clara (audible en altavoces de celular)
-            const cycle = (t % 3.4);
-            if (cycle < 2.2) {
-                const palatal = Math.sin(2 * Math.PI * 85 * t)
-                    + 0.75 * Math.sin(2 * Math.PI * 170 * t)
-                    + 0.5 * Math.sin(2 * Math.PI * 255 * t)
-                    + 0.3 * Math.sin(2 * Math.PI * 340 * t);
-                const friction = (Math.random() * 2 - 1) * 0.55;
-                const flutterMod = 1 + 0.35 * Math.sin(2 * Math.PI * 22 * t);
-                const env = Math.pow(Math.sin(Math.PI * (cycle / 2.2)), 1.3);
-                sample = (palatal * flutterMod + friction) * 22000 * env;
+        if (soundType === 'snore') {
+            // Firma acústica de ronquido: vibración de 75-80 Hz con fricción y envolvente respiratoria
+            const cycle = (t % 3.2);
+            if (cycle < 2.0) {
+                const flutter = Math.sin(2 * Math.PI * 78 * t) + 0.5 * Math.sin(2 * Math.PI * 156 * t);
+                const noise = (Math.random() * 2 - 1) * 0.45;
+                const env = Math.sin(Math.PI * (cycle / 2.0));
+                sample = (flutter + noise) * 13000 * env;
             }
-        } else if (norm.includes('cough') || norm.includes('tos')) {
-            // Tos aguda explosiva en dos golpes
+        } else if (soundType === 'cough') {
+            // Firma acústica de tos: doble golpe transitorio rápido
             const burst = (t % 2.0);
-            if (burst < 0.22) {
+            if (burst < 0.22 || (burst > 0.32 && burst < 0.52)) {
                 const noise = (Math.random() * 2 - 1);
-                const tone = Math.sin(2 * Math.PI * 380 * t) * 0.4;
-                sample = (noise + tone) * 25000 * Math.exp(-burst * 14);
-            } else if (burst > 0.32 && burst < 0.56) {
-                const t2 = burst - 0.32;
-                const noise = (Math.random() * 2 - 1);
-                const tone = Math.sin(2 * Math.PI * 420 * t) * 0.4;
-                sample = (noise + tone) * 22000 * Math.exp(-t2 * 12);
+                sample = noise * 17000 * Math.exp(-(burst % 0.3) * 16);
             }
-        } else if (norm.includes('breath') || norm.includes('respiraci')) {
-            // Respiracin rtmica y relajante
-            const cycle = (t % 3.8);
-            const isExhale = cycle > 1.7;
-            const sub = isExhale ? (cycle - 1.7) / 2.1 : cycle / 1.7;
-            const env = Math.sin(Math.PI * sub);
-            const hiss = (Math.random() * 2 - 1) * 0.7;
-            const tone = Math.sin(2 * Math.PI * (isExhale ? 320 : 380) * t) * 0.35;
-            sample = (hiss + tone) * (isExhale ? 16000 : 13500) * env;
-        } else if (norm.includes('move') || norm.includes('movimiento')) {
-            // Movimiento corporal y sbanas
-            const rustle = (t % 3.2);
-            if (rustle < 1.4) {
-                const friction = (Math.random() * 2 - 1) * 0.8;
-                const creak = Math.sin(2 * Math.PI * 180 * t) * Math.sin(2 * Math.PI * 12 * t);
-                const env = Math.sin(Math.PI * (rustle / 1.4));
-                sample = (friction + creak) * 17000 * env;
-            }
-        } else if (norm.includes('voice') || norm.includes('habla') || norm.includes('speech')) {
-            // Somniloquio / murmullo suave de voz
-            const syl = (t % 2.5);
-            if (syl < 1.6) {
-                const f0 = 145 + 25 * Math.sin(2 * Math.PI * 3 * t);
-                const vocal = Math.sin(2 * Math.PI * f0 * t)
-                    + 0.6 * Math.sin(2 * Math.PI * f0 * 2 * t)
-                    + 0.4 * Math.sin(2 * Math.PI * f0 * 4 * t);
-                const noise = (Math.random() * 2 - 1) * 0.25;
-                const env = Math.sin(Math.PI * (syl / 1.6)) * (0.6 + 0.4 * Math.sin(2 * Math.PI * 5 * t));
-                sample = (vocal + noise) * 20000 * env;
+        } else if (soundType === 'movement') {
+            // Movimiento en cama: rumor sordo de baja frecuencia
+            const rustle = (t % 4.0);
+            if (rustle < 1.8) {
+                const rumble = Math.sin(2 * Math.PI * 50 * t);
+                const noise = (Math.random() * 2 - 1) * 0.7;
+                sample = (rumble + noise) * 6000 * Math.sin(Math.PI * (rustle / 1.8));
             }
         } else {
-            // Ambiente de dormitorio fluido y perceptible (respiracin profunda + presencia acstica ambiental)
-            const cycle = (t % 4.0) / 4.0;
-            const breathEnv = Math.pow(Math.sin(Math.PI * cycle), 1.4);
-            const air = (Math.random() * 2 - 1) * 12000 * (0.35 + 0.65 * breathEnv);
-            const tone = (Math.sin(2 * Math.PI * 220 * t) + 0.5 * Math.sin(2 * Math.PI * 330 * t)) * 4000 * breathEnv;
-            sample = air + tone;
+            // Ambiente nocturno continuo: respiración relajante (ciclo 5s = 0.2 Hz) + ruido blanco suave
+            const breathEnv = 0.35 + 0.65 * Math.pow(Math.max(0, Math.sin(2 * Math.PI * 0.2 * t)), 1.6);
+            const noise = (Math.random() * 2 - 1) * 850 * breathEnv;
+            const drone = Math.sin(2 * Math.PI * 65 * t) * 350 * breathEnv;
+            sample = noise + drone;
         }
 
         const clamped = Math.max(-32767, Math.min(32767, Math.round(sample)));
@@ -314,7 +278,7 @@ function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundTy
 }
 
 // Generador de eventos de respaldo (garantiza que ninguna noche se muestre con 2 o 5 eventos)
-// Inicia rigurosamente en la hora real de pulsaciÃ³n del botÃ³n (o startTimestamp real)
+// Inicia rigurosamente en la hora real de pulsación del botón (o startTimestamp real)
 function generateDefaultNightEvents(sessionDate, totalDurationMs = 21240000, score = 70, startTimestamp = null) {
     const sDate = sessionDate || '2026-09-19';
     const count = score > 85 ? 20 : (score < 50 ? 25 : (sDate.includes('19') ? 24 : 21));
@@ -398,9 +362,9 @@ function getSeniorNightPill(rec) {
     };
 }
 
-// â”€â”€â”€ Helper: RNG Lineal Congruencial sembrado por sesiÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: RNG Lineal Congruencial sembrado por sesión ───────────────────────
 // Garantiza que cada noche tenga sus propios patrones de eventos, distintos
-// entre sÃ­ pero reproducibles (mismo archivo â†’ mismos eventos).
+// entre sí pero reproducibles (mismo archivo → mismos eventos).
 function makeSeededRng(seed) {
     let s = (Math.abs(seed) % 2147483647) || 987654321;
     return function () {
@@ -409,17 +373,17 @@ function makeSeededRng(seed) {
     };
 }
 
-// â”€â”€â”€ Clasificador AcÃºstico Local Calibrado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Clasificador Acústico Local Calibrado ──────────────────────────────────
 function classifyAcousticEvent({ avgDb, maxDb }) {
     const range = maxDb - avgDb;
 
-    // 1. Tos o Estornudo: Evento transitorio sÃºbito muy agudo
+    // 1. Tos o Estornudo: Evento transitorio súbito muy agudo
     if (maxDb > -26 && range >= 14) {
         return {
             eventType: 'cough',
-            label: 'ðŸ¤§ Tos / Estornudo',
+            label: '🤧 Tos / Estornudo',
             confidence: Math.min(96, Math.round(86 + Math.random() * 8)),
-            description: 'Evento acÃºstico sÃºbito de alta energÃ­a',
+            description: 'Evento acústico súbito de alta energía',
         };
     }
 
@@ -427,29 +391,29 @@ function classifyAcousticEvent({ avgDb, maxDb }) {
     if ((maxDb >= -45 && avgDb >= -52 && range < 22) || (avgDb >= -44 && range < 16)) {
         return {
             eventType: 'snore',
-            label: 'ðŸ˜´ Ronquido',
+            label: '😴 Ronquido',
             confidence: Math.min(95, Math.round(88 + Math.random() * 7)),
-            description: 'PatrÃ³n respiratorio con resonancia sostenida',
+            description: 'Patrón respiratorio con resonancia sostenida',
         };
     }
 
-    // 3. Voz / Habla (ModulaciÃ³n silÃ¡bica humana)
+    // 3. Voz / Habla (Modulación silábica humana)
     if ((maxDb > -32 && range >= 9 && avgDb < -46) || (maxDb > -22)) {
         return {
             eventType: 'voice',
-            label: 'ðŸ—£ï¸ Voz / Habla',
+            label: '🗣️ Voz / Habla',
             confidence: Math.min(94, Math.round(85 + Math.random() * 9)),
-            description: 'PatrÃ³n armÃ³nico modulado compatible con habla humana',
+            description: 'Patrón armónico modulado compatible con habla humana',
         };
     }
 
-    // 4. RespiraciÃ³n Profunda
+    // 4. Respiración Profunda
     if (avgDb > -48 && avgDb <= -38 && range < 10) {
         return {
             eventType: 'breathing',
-            label: 'ðŸ« RespiraciÃ³n Profunda',
+            label: '🫁 Respiración Profunda',
             confidence: 88,
-            description: 'Flujo de aire continuo y rÃ­tmico',
+            description: 'Flujo de aire continuo y rítmico',
         };
     }
 
@@ -457,17 +421,17 @@ function classifyAcousticEvent({ avgDb, maxDb }) {
     if (maxDb > -36 && range >= 6 && range < 14) {
         return {
             eventType: 'movement',
-            label: 'ðŸ›ï¸ Movimiento',
+            label: '🛏️ Movimiento',
             confidence: 85,
-            description: 'FricciÃ³n o movimiento de sÃ¡banas/colchÃ³n',
+            description: 'Fricción o movimiento de sábanas/colchón',
         };
     }
 
     return {
         eventType: 'snore',
-        label: 'ðŸ˜´ Ronquido Suave',
+        label: '😴 Ronquido Suave',
         confidence: 84,
-        description: 'Resonancia acÃºstica nocturna leve',
+        description: 'Resonancia acústica nocturna leve',
     };
 }
 
@@ -486,7 +450,7 @@ const fmtMs = (ms) => {
 };
 
 export default function RecordingScreen({ token, onLogout }) {
-    // PestaÃ±a Activa: 'monitoring' | 'score' | 'prediction' | 'recordings'
+    // Pestaña Activa: 'monitoring' | 'score' | 'prediction' | 'recordings'
     const [activeTab, setActiveTab] = useState('monitoring');
 
     // Estado de Monitoreo
@@ -506,7 +470,7 @@ export default function RecordingScreen({ token, onLogout }) {
         totalEvents: 0,
     });
 
-    // GrabaciÃ³n de Prueba de 5s
+    // Grabación de Prueba de 5s
     const [isTesting, setIsTesting] = useState(false);
     const [testCountdown, setTestCountdown] = useState(5);
 
@@ -523,20 +487,20 @@ export default function RecordingScreen({ token, onLogout }) {
     const [selectedNightIndex, setSelectedNightIndex] = useState(0);
     const [selectedEvent, setSelectedEvent] = useState(null);
 
-    // SincronizaciÃ³n de EstadÃ­sticas con el Sistema Web
+    // Sincronización de Estadísticas con el Sistema Web
     const [isSyncingStats, setIsSyncingStats] = useState(false);
 
     // Pausa de Privacidad
     const [isRecordingPaused, setIsRecordingPaused] = useState(false);
 
-    // â”€â”€â”€ Estado EinsDream Pair (Monitoreo Dual con Dos Celulares) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Estado EinsDream Pair (Monitoreo Dual con Dos Celulares) ─────────────
     const [pairModalVisible, setPairModalVisible] = useState(false);
     const [pairConfig, setPairConfig] = useState(null); // null | { isPair, roomId, roomCode, role, partnerRole, clockOffsetMs }
     const [pairSessionResult, setPairSessionResult] = useState(null);
     const pairConfigRef = useRef(null);
     const pairEventsBufferRef = useRef([]);
 
-    // â”€â”€â”€ Estado del Motor Einsdream & PredicciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Estado del Motor Einsdream & Predicción ──────────────────────────────
     const [sleepProfile, setSleepProfile] = useState({
         chronotype: 'intermediate',
         targetBedtime: '23:00',
@@ -552,7 +516,7 @@ export default function RecordingScreen({ token, onLogout }) {
     });
     const [showSleepTestModal, setShowSleepTestModal] = useState(false);
 
-    // Ãšltima sesiÃ³n evaluada para la pestaÃ±a Einsdream Score
+    // Última sesión evaluada para la pestaña Einsdream Score
     const [nightAnalysis, setNightAnalysis] = useState(null);
     const [trendsData, setTrendsData] = useState(null);
     const [optimalBedtimeData, setOptimalBedtimeData] = useState(null);
@@ -576,7 +540,7 @@ export default function RecordingScreen({ token, onLogout }) {
     const totalPausedMsRef = useRef(0);          // ms acumulados en pausa (no cuentan como noche)
     const pauseSegmentsRef = useRef([]);        // segmentos de pausas de privacidad [{ pausedAt, resumedAt, durationMs }]
 
-    // â”€â”€â”€ InicializaciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Inicialización ───────────────────────────────────────────────────────
     useEffect(() => {
         setupAudioMode();
         loadLocalProfile();
@@ -611,7 +575,7 @@ export default function RecordingScreen({ token, onLogout }) {
         return FileSystem.documentDirectory || FileSystem.cacheDirectory || '';
     };
 
-    // â”€â”€â”€ Cargar Perfil de SueÃ±o (Sleep Test) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Cargar Perfil de Sueño (Sleep Test) ──────────────────────────────────
     const loadLocalProfile = async () => {
         try {
             const dir = getBaseDir();
@@ -647,12 +611,12 @@ export default function RecordingScreen({ token, onLogout }) {
             }
         } catch (_) {}
 
-        // Recalcular predicciones con la nueva lÃ­nea base
+        // Recalcular predicciones con la nueva línea base
         await reloadTrendsAndPredictions(newProfile);
-        Alert.alert('âœ… EvaluaciÃ³n Guardada', 'Tu lÃ­nea base y recomendaciones han sido recalculadas con Ã©xito.');
+        Alert.alert('✅ Evaluación Guardada', 'Tu línea base y recomendaciones han sido recalculadas con éxito.');
     };
 
-    // â”€â”€â”€ GestiÃ³n de Sesiones Reales en CachÃ© Local â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Gestión de Sesiones Reales en Caché Local ─────────────────────────────
     const loadCachedSessions = async () => {
         try {
             const dir = getBaseDir();
@@ -672,8 +636,8 @@ export default function RecordingScreen({ token, onLogout }) {
             const dir = getBaseDir();
             const filePath = dir + SESSIONS_CACHE_FILENAME;
             const current = await loadCachedSessions();
-            // FIX v2.9.8: Usar fecha LOCAL (getNightDate) â€” no UTC â€” para la clave de deduplicaciÃ³n
-            // Esto evita que sesiones de madrugada (ej. 01:00) se guarden con fecha del dÃ­a siguiente
+            // FIX v2.9.8: Usar fecha LOCAL (getNightDate) — no UTC — para la clave de deduplicación
+            // Esto evita que sesiones de madrugada (ej. 01:00) se guarden con fecha del día siguiente
             const sDate = session.sessionDate
                 || (session.startTime ? getNightDate(new Date(session.startTime).getTime()) : getLocalDateStr());
             const filtered = current.filter(s => {
@@ -701,7 +665,7 @@ export default function RecordingScreen({ token, onLogout }) {
         }
     };
 
-    // â”€â”€â”€ Cargar AnÃ¡lisis Inicial con Datos Reales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Cargar Análisis Inicial con Datos Reales ─────────────────────────────
     const loadInitialAnalysis = async () => {
         setIsEvaluating(true);
         try {
@@ -739,7 +703,7 @@ export default function RecordingScreen({ token, onLogout }) {
         }
     };
 
-    // â”€â”€â”€ Cargar y Gestionar Metadatos e Ãndice Local â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Cargar y Gestionar Metadatos e Índice Local ──────────────────────────
     const loadMetadataIndex = async () => {
         try {
             const dir = getBaseDir();
@@ -761,7 +725,7 @@ export default function RecordingScreen({ token, onLogout }) {
         } catch (_) {}
     };
 
-    // â”€â”€â”€ Actualizar Lista de Grabaciones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Actualizar Lista de Grabaciones ──────────────────────────────────────
     const refreshRecordings = useCallback(async () => {
         setLoadingRecs(true);
         try {
@@ -773,7 +737,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
             const metaIndex = await loadMetadataIndex();
 
-            // â”€â”€â”€ 0. Rescate AutomÃ¡tico de Grabaciones en CachÃ© de Expo & CorrecciÃ³n 1970 â”€â”€
+            // ─── 0. Rescate Automático de Grabaciones en Caché de Expo & Corrección 1970 ──
             try {
                 const cacheAudioDir = `${FileSystem.cacheDirectory}Audio/`;
                 const cacheInfo = await FileSystem.getInfoAsync(cacheAudioDir);
@@ -784,7 +748,7 @@ export default function RecordingScreen({ token, onLogout }) {
                             const cUri = cacheAudioDir + cf;
                             const cStat = await FileSystem.getInfoAsync(cUri, { size: true });
                             if (cStat.exists && cStat.size > 300 * 1024) {
-                                // CorrecciÃ³n Unix seconds -> milliseconds
+                                // Corrección Unix seconds -> milliseconds
                                 const rawMtime = cStat.modificationTime
                                     ? (cStat.modificationTime < 1e11 ? cStat.modificationTime * 1000 : cStat.modificationTime)
                                     : Date.now();
@@ -792,11 +756,11 @@ export default function RecordingScreen({ token, onLogout }) {
                                 const destUri = dir + destName;
                                 await FileSystem.copyAsync({ from: cUri, to: destUri });
 
-                                // FIX v2.9.8: Usar getNightDate (hora local + regla madrugada) â€” no UTC slice
+                                // FIX v2.9.8: Usar getNightDate (hora local + regla madrugada) — no UTC slice
                                 const sDate = getNightDate(rawMtime);
                                 metaIndex[destName] = {
                                     filename: destName,
-                                    label: 'ðŸŒ™ Noche Recuperada (CachÃ©)',
+                                    label: '🌙 Noche Recuperada (Caché)',
                                     eventType: 'night_session',
                                     isNightSession: true,
                                     sizeBytes: cStat.size,
@@ -815,7 +779,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 console.warn('[rescueOrphanRecordings]', errRescue.message);
             }
 
-            // â”€â”€â”€ Auto-ReparaciÃ³n de Registros con Fecha 1970 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ─── Auto-Reparación de Registros con Fecha 1970 ─────────────────────────────
             let metaRepaired = false;
             for (const k of Object.keys(metaIndex)) {
                 const m = metaIndex[k];
@@ -829,7 +793,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     m.timestamp    = fixedTime;
                     m.sessionDate  = getNightDate(fixedTime);
                     if (m.label && m.label.includes('1970')) {
-                        m.label = 'ðŸŒ™ Noche Recuperada';
+                        m.label = '🌙 Noche Recuperada';
                     }
                     metaRepaired = true;
                 }
@@ -846,7 +810,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 await saveMetadataIndex(metaIndex);
             }
 
-            // â”€â”€â”€ Cargar blocklist de audios nube eliminados â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ─── Cargar blocklist de audios nube eliminados ───────────────────────────────
             let deletedCloudSet = new Set();
             try {
                 const delPath = getBaseDir() + DELETED_CLOUD_IDS_FILENAME;
@@ -877,7 +841,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
                 const durMs = meta.durationMs || Math.round(((info.size || 0) / 4000) * 1000);
 
-                // Determinar el timestamp exacto de inicio de la grabaciÃ³n (pulsaciÃ³n del botÃ³n)
+                // Determinar el timestamp exacto de inicio de la grabación (pulsación del botón)
                 const fileStartMatch = file.match(/_(\d{12,14})\./);
                 const fileStartTs = fileStartMatch ? parseInt(fileStartMatch[1], 10) : null;
                 const exactStartTs = meta.startTimestamp || fileStartTs || (meta.timestamp && meta.timestamp !== mTime ? meta.timestamp : null) || (mTime - durMs);
@@ -888,18 +852,18 @@ export default function RecordingScreen({ token, onLogout }) {
                     sDate = getNightDate(exactStartTs);
                 }
 
-                // Generar eventos acÃºsticos para sesiones nocturnas con 0 eventos
+                // Generar eventos acústicos para sesiones nocturnas con 0 eventos
                 // FIX v2.8.0: Usar RNG sembrado por startTs para que cada noche tenga
-                // patrones Ãºnicos en lugar del mismo ciclo de sin(i).
+                // patrones únicos en lugar del mismo ciclo de sin(i).
                 let soundEvents = meta.soundEvents || [];
                 if ((meta.isNightSession || file.startsWith('noche_')) && soundEvents.length === 0 && durMs > 60000) {
                     const startTs = exactStartTs;
                     const rng = makeSeededRng(startTs);
                     const totalCount = Math.max(4, Math.min(30, Math.round(durMs / (10 * 60 * 1000))));
-                    // DistribuciÃ³n tipo arquitectura de sueÃ±o real:
-                    // Primer tercio  (sueÃ±o ligero): 45% de eventos
-                    // Segundo tercio (sueÃ±o profundo): 20% de eventos
-                    // Tercer tercio  (sueÃ±o ligero): 35% de eventos
+                    // Distribución tipo arquitectura de sueño real:
+                    // Primer tercio  (sueño ligero): 45% de eventos
+                    // Segundo tercio (sueño profundo): 20% de eventos
+                    // Tercer tercio  (sueño ligero): 35% de eventos
                     const thirdMs = durMs / 3;
                     const counts  = [
                         Math.round(totalCount * 0.45),
@@ -914,16 +878,16 @@ export default function RecordingScreen({ token, onLogout }) {
                         // Generar tiempos dentro del tercio (ordenados)
                         const times = [];
                         for (let i = 0; i < n; i++) {
-                            // Jitter de hasta Â±3 min alrededor del punto equidistante
+                            // Jitter de hasta ±3 min alrededor del punto equidistante
                             const baseOffset = offsetBase + ((thirdMs / (n + 1)) * (i + 1));
-                            const jitter = (rng() - 0.5) * 360000; // Â±3 min
+                            const jitter = (rng() - 0.5) * 360000; // ±3 min
                             times.push(Math.max(0, Math.min(durMs - 1000, Math.round(baseOffset + jitter))));
                         }
                         times.sort((a, b) => a - b);
                         for (const offset of times) {
                             const evDate  = new Date(startTs + offset);
                             // Tipos: en el tercio del medio predomina ronquido suave,
-                            // en extremos hay mÃ¡s variedad
+                            // en extremos hay más variedad
                             const roll = rng();
                             const type = tercio === 1
                                 ? (roll < 0.85 ? 'snore' : 'breathing')
@@ -933,7 +897,7 @@ export default function RecordingScreen({ token, onLogout }) {
                                          : type === 'voice'     ? -(26 + Math.round(rng() * 10))
                                          : type === 'movement'  ? -(30 + Math.round(rng() * 10))
                                          :                        -(42 + Math.round(rng() * 8));
-                            const labelMap = { snore: 'ðŸ˜´ Ronquido', cough: 'ðŸ¤§ Tos', voice: 'ðŸ—£ï¸ Voz', movement: 'ðŸ›ï¸ Movimiento', breathing: 'ðŸ« RespiraciÃ³n' };
+                            const labelMap = { snore: '😴 Ronquido', cough: '🤧 Tos', voice: '🗣️ Voz', movement: '🛏️ Movimiento', breathing: '🫁 Respiración' };
                             reconstructed.push({
                                 eventNumber: evNumber++,
                                 offsetMs:    offset,
@@ -942,7 +906,7 @@ export default function RecordingScreen({ token, onLogout }) {
                                 timestamp:   evDate.toISOString(),
                                 eventType:   type,
                                 type,
-                                label:       labelMap[type] || 'ðŸ˜´ Ronquido',
+                                label:       labelMap[type] || '😴 Ronquido',
                                 confidence:  Math.round(82 + rng() * 15),
                                 intensityDb: Math.abs(peakDb),
                                 peakDb,
@@ -963,7 +927,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     uri,
                     label: (meta.label && meta.label !== 'unknown' && !meta.label.includes('1970'))
                         ? meta.label
-                        : (file.startsWith('prueba_') ? 'ðŸŽ™ï¸ Prueba de MicrÃ³fono' : file.startsWith('noche_') ? 'ðŸŒ™ Audio Nocturno' : 'ðŸŽ§ Audio'),
+                        : (file.startsWith('prueba_') ? '🎙️ Prueba de Micrófono' : file.startsWith('noche_') ? '🌙 Audio Nocturno' : '🎧 Audio'),
                     eventType: (meta.eventType && meta.eventType !== 'unknown') ? meta.eventType : 'audio',
                     confidence: meta.confidence || 85,
                     intensityDb: meta.intensityDb || -30,
@@ -984,7 +948,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 });
             }
 
-            // Sincronizar y recuperar grabaciones histÃ³ricas desde la nube
+            // Sincronizar y recuperar grabaciones históricas desde la nube
             if (token) {
                 try {
                     const cloudRes = await axios.get(`${API_URL}/sessions/me?limit=50`, {
@@ -995,7 +959,7 @@ export default function RecordingScreen({ token, onLogout }) {
                     const cloudUploadedSet = new Set();
 
                     for (const cs of cloudSessions) {
-                        // FIX v2.8.0: Saltar sesiones que el usuario ya eliminÃ³ (blocklist local)
+                        // FIX v2.8.0: Saltar sesiones que el usuario ya eliminó (blocklist local)
                         if (deletedCloudSet.has(cs._id)) continue;
 
                         const cloudKey = cs.storageKey || cs.s3Key || cs.filename || `cloud_${cs._id}.m4a`;
@@ -1013,7 +977,7 @@ export default function RecordingScreen({ token, onLogout }) {
                             const typeLabel = cs.eventType === 'snore' || cs.eventType === 'ronquido' ? 'Ronquido'
                                 : cs.eventType === 'cough' || cs.eventType === 'tos' ? 'Tos'
                                 : cs.eventType === 'voice' || cs.eventType === 'habla' ? 'Voz / Habla'
-                                : cs.eventType === 'breathing' ? 'RespiraciÃ³n'
+                                : cs.eventType === 'breathing' ? 'Respiración'
                                 : (cs.eventType === 'movement' ? 'Movimiento' : 'Audio Nocturno');
 
                             list.push({
@@ -1021,7 +985,7 @@ export default function RecordingScreen({ token, onLogout }) {
                                 filename: baseName,
                                 cloudId: cs._id,
                                 uri: streamUri,
-                                label: (cs.label && cs.label !== 'unknown') ? cs.label : `â˜ï¸ ${typeLabel}`,
+                                label: (cs.label && cs.label !== 'unknown') ? cs.label : `☁️ ${typeLabel}`,
                                 eventType: cs.eventType || 'audio',
                                 confidence: cs.confidence || 85,
                                 intensityDb: cs.intensityDb || 55,
@@ -1045,7 +1009,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 }
             }
 
-            // Sincronizar y recuperar sesiones nocturnas histÃ³ricas desde la nube (/api/night-sessions/history)
+            // Sincronizar y recuperar sesiones nocturnas históricas desde la nube (/api/night-sessions/history)
             if (token) {
                 try {
                     const nightHistoryRes = await axios.get(`${API_URL}/night-sessions/history?limit=30`, {
@@ -1103,7 +1067,7 @@ export default function RecordingScreen({ token, onLogout }) {
                             const startTs = startD.getTime();
                             const durMs = ns.totalDurationMs || Math.max(60000, endD.getTime() - startTs);
 
-                            // Buscar si existe algÃºn archivo local huÃ©rfano con fecha coincidente
+                            // Buscar si existe algún archivo local huérfano con fecha coincidente
                             const unattached = list.find(r => !r.isCloud && !r.isNightSession && (r.filename && r.filename.includes(sDate)));
                             const localUri = unattached ? unattached.uri : null;
 
@@ -1145,7 +1109,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
             list.sort((a, b) => b.modTime - a.modTime);
 
-            // â”€â”€â”€ Auto-InyecciÃ³n en CachÃ© de SCORE para las Noches Locales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ─── Auto-Inyección en Caché de SCORE para las Noches Locales ──────────────
             try {
                 const cachedSessions = await loadCachedSessions();
                 let cacheChanged = false;
@@ -1164,7 +1128,7 @@ export default function RecordingScreen({ token, onLogout }) {
                             const realStartMs = rec.startTimestamp || (rec.modTime - (durMin * 60000));
                             const realEndMs = rec.endTimestamp || (realStartMs + (durMin * 60000));
 
-                            // CÃ¡lculo riguroso de los 3 pilares condicionado a horas reales vs meta
+                            // Cálculo riguroso de los 3 pilares condicionado a horas reales vs meta
                             let durScore = Math.min(100, Math.max(15, Math.round((durMin / targetMin) * 100)));
                             if (durMin < 300) {
                                 durScore = Math.min(60, durScore);
@@ -1186,7 +1150,7 @@ export default function RecordingScreen({ token, onLogout }) {
                             }
 
                             const totalScore = Math.min(100, Math.max(20, Math.round(0.40 * regScore + 0.30 * durScore + 0.30 * calScore)));
-                            const qualityLabel = (durMin < 300 || diffMin <= -120) ? 'Insuficiente' : (durMin < 390 ? 'Moderada' : 'Ã“ptima');
+                            const qualityLabel = (durMin < 300 || diffMin <= -120) ? 'Insuficiente' : (durMin < 390 ? 'Moderada' : 'Óptima');
 
                             const sessionEntry = {
                                 sessionId: `night_${recDate.replace(/-/g, '_')}`,
@@ -1256,7 +1220,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 console.warn('[refreshRecordings cache injection]', eCache.message);
             }
 
-            // Memoria Protegida: 500 MB FIFO (ProtecciÃ³n absoluta de sesiones nocturnas)
+            // Memoria Protegida: 500 MB FIFO (Protección absoluta de sesiones nocturnas)
             const maxBytes = MAX_STORAGE_MB * 1024 * 1024;
             if (totalBytes > maxBytes) {
                 const testRecs = list.filter(r => !r.isCloud && r.filename && r.filename.startsWith('prueba_'));
@@ -1294,7 +1258,7 @@ export default function RecordingScreen({ token, onLogout }) {
         }
     }, []);
 
-    // â”€â”€â”€ Reproductor de Audio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Reproductor de Audio ─────────────────────────────────────────────────
     const unloadSound = async () => {
         if (soundRef.current) {
             try {
@@ -1310,14 +1274,11 @@ export default function RecordingScreen({ token, onLogout }) {
     };
 
     // Helper: asegura una pista de audio reproducible localmente para cualquier noche
-        // Helper: asegura una pista de audio reproducible localmente para cualquier noche
     const ensurePlayableUri = async (rec) => {
-        // 0. Si ya es una URL remota http/https, usarla directamente
         if (rec.uri && rec.uri.startsWith('http')) {
             return { uri: rec.uri, isRealFile: true };
         }
-
-        // 1. Si ya tiene URI local y el archivo existe fsicamente y no est corrupto
+        // 1. Si ya tiene URI local y el archivo existe físicamente y no está corrupto
         if (rec.uri && !rec.uri.startsWith('http')) {
             try {
                 const info = await FileSystem.getInfoAsync(rec.uri);
@@ -1327,7 +1288,7 @@ export default function RecordingScreen({ token, onLogout }) {
             } catch (_) {}
         }
 
-        // 2. Buscar en el directorio de documentos o cach si hay algn archivo .m4a real grabado
+        // 2. Buscar en el directorio de documentos o caché si hay algún archivo .m4a real grabado
         try {
             const dir = getBaseDir();
             const files = await FileSystem.readDirectoryAsync(dir);
@@ -1350,14 +1311,14 @@ export default function RecordingScreen({ token, onLogout }) {
         // 3. Audio de contingencia continua en 16-Bit PCM WAV (Totalmente nativo y compatible en Android)
         try {
             const sDate = rec.sessionDate || 'night';
-            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v6.wav`;
+            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v5.wav`;
             const wavInfo = await FileSystem.getInfoAsync(cacheWav);
             if (wavInfo.exists && wavInfo.size > 2000) {
                 return { uri: cacheWav, isRealFile: false };
             }
 
             const sampleRate = 16000;
-            const durationSec = 45; // 45 segundos de ambiente nocturno fluido y audible
+            const durationSec = 45; // 45 segundos de ambiente nocturno fluido
             const b64 = generate16BitPcmWavBase64(sampleRate, durationSec, 'ambient');
             await FileSystem.writeAsStringAsync(cacheWav, b64, {
                 encoding: FileSystem.EncodingType.Base64
@@ -1392,7 +1353,7 @@ export default function RecordingScreen({ token, onLogout }) {
         }, 500);
     };
 
-        const handlePlayPause = async (rec) => {
+    const handlePlayPause = async (rec) => {
         try {
             const trackId = rec.id || rec.filename;
             const nightDur = rec.durationMs || 21240000;
@@ -1421,13 +1382,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
                 const { sound } = await Audio.Sound.createAsync(
                     source,
-                    {
-                        shouldPlay: true,
-                        isLooping: !isRealFile,
-                        volume: 1.0,
-                        isMuted: false,
-                        progressUpdateIntervalMillis: 250
-                    },
+                    { shouldPlay: true, isLooping: !isRealFile, volume: 1.0, isMuted: false, progressUpdateIntervalMillis: 250 },
                     (status) => {
                         if (status.isLoaded) {
                             if (isRealFile) {
@@ -1442,11 +1397,7 @@ export default function RecordingScreen({ token, onLogout }) {
                         }
                     }
                 );
-                try {
-                    await sound.setVolumeAsync(1.0);
-                    await sound.setIsMutedAsync(false);
-                } catch (_) {}
-
+                try { await sound.setVolumeAsync(1.0); } catch (_) {}
                 soundRef.current = sound;
                 setPlayingUri(trackId);
                 setDurMs(nightDur);
@@ -1463,13 +1414,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 stopVirtualTicker();
                 setPlaying(false);
             } else {
-                if (soundRef.current) {
-                    try {
-                        await soundRef.current.setVolumeAsync(1.0);
-                        await soundRef.current.setIsMutedAsync(false);
-                    } catch (_) {}
-                    await soundRef.current.playAsync();
-                }
+                if (soundRef.current) await soundRef.current.playAsync();
                 if (!isRealFileRef.current) {
                     startVirtualTicker(durMs || nightDur);
                 }
@@ -1483,77 +1428,27 @@ export default function RecordingScreen({ token, onLogout }) {
     };
 
     // Navega y reproduce la noche continuamente desde la marca de un evento (EinsDream 3.0)
-        // Navega y reproduce el evento acstico exacto o la noche continuamente (EinsDream 3.0)
     const playEventAtTime = async (offsetMs, rec, eventObj = null) => {
         try {
-            let activeEvt = eventObj;
-            if (!activeEvt && rec.soundEvents) {
-                activeEvt = rec.soundEvents.find(e => {
+            if (eventObj) {
+                setSelectedEvent(eventObj);
+            } else if (rec.soundEvents) {
+                const match = rec.soundEvents.find(e => {
                     const o = (e.offsetMs !== undefined && e.offsetMs !== null) ? e.offsetMs : (e.relativeMs || 0);
                     return Math.abs(o - offsetMs) < 1000;
                 });
-            }
-            if (activeEvt) {
-                setSelectedEvent(activeEvt);
+                if (match) setSelectedEvent(match);
             }
 
             const trackId = rec.id || rec.filename;
             const nightDur = rec.durationMs || 21240000;
             const targetMs = Math.max(0, Math.min(nightDur, Math.round(offsetMs)));
-            setPosMs(targetMs);
 
-            // Si el usuario puls un evento acstico especfico, reproducir de inmediato el audio claro de ese evento
-            if (activeEvt) {
-                const evType = getEventType(activeEvt) || 'snore';
-                const eventCacheWav = `${FileSystem.cacheDirectory}event_${evType}_v6.wav`;
-                const evInfo = await FileSystem.getInfoAsync(eventCacheWav);
-                if (!evInfo.exists || evInfo.size < 2000) {
-                    const b64 = generate16BitPcmWavBase64(16000, 4, evType);
-                    await FileSystem.writeAsStringAsync(eventCacheWav, b64, {
-                        encoding: FileSystem.EncodingType.Base64
-                    });
-                }
-
-                await unloadSound();
-                stopVirtualTicker();
-
-                await Audio.setAudioModeAsync({
-                    allowsRecordingIOS: false,
-                    playsInSilentModeIOS: true,
-                    staysActiveInBackground: false,
-                    shouldDuckAndroid: false,
-                    playThroughEarpieceAndroid: false,
-                    interruptionModeIOS: InterruptionModeIOS?.DoNotMix ?? 1,
-                    interruptionModeAndroid: InterruptionModeAndroid?.DoNotMix ?? 1,
-                });
-
-                const { sound } = await Audio.Sound.createAsync(
-                    { uri: eventCacheWav },
-                    { shouldPlay: true, isLooping: false, volume: 1.0, isMuted: false },
-                    (status) => {
-                        if (status.isLoaded) {
-                            if (status.didJustFinish) {
-                                setPlaying(false);
-                            }
-                        }
-                    }
-                );
-                try {
-                    await sound.setVolumeAsync(1.0);
-                    await sound.setIsMutedAsync(false);
-                } catch (_) {}
-
-                soundRef.current = sound;
-                setPlayingUri(`evt_${activeEvt.eventNumber || offsetMs}`);
-                setDurMs(4000);
-                setPlaying(true);
-                return;
-            }
-
-            // Si es reproduccin continua de la noche
             if (playingUri !== trackId && playingUri !== rec.uri) {
                 await handlePlayPause(rec);
             }
+
+            setPosMs(targetMs);
 
             if (soundRef.current) {
                 try {
@@ -1582,7 +1477,7 @@ export default function RecordingScreen({ token, onLogout }) {
             const targetMs = Math.max(0, Math.min(durMs, Math.round(pct * durMs)));
             setPosMs(targetMs);
 
-            // Auto-seleccionar el evento mÃ¡s cercano a este punto de la noche
+            // Auto-seleccionar el evento más cercano a este punto de la noche
             const nights = localRecordings.filter(r => r.isNightSession || r.sessionDate || (r.soundEvents && r.soundEvents.length > 0));
             const activeNight = nights[selectedNightIndex] || nights[0];
             if (activeNight && activeNight.soundEvents) {
@@ -1627,7 +1522,7 @@ export default function RecordingScreen({ token, onLogout }) {
     };
 
     const handleDelete = async (rec) => {
-        Alert.alert('Eliminar grabaciÃ³n', `Â¿Eliminar ${rec.label}?`, [
+        Alert.alert('Eliminar grabación', `¿Eliminar ${rec.label}?`, [
             { text: 'Cancelar', style: 'cancel' },
             {
                 text: 'Eliminar',
@@ -1680,7 +1575,7 @@ export default function RecordingScreen({ token, onLogout }) {
         ]);
     };
 
-    // â”€â”€â”€ MONITOREO INTELIGENTE (SOLO O PAREJA) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── MONITOREO INTELIGENTE (SOLO O PAREJA) ────────────────────────────────
     const toggleSmartMonitoring = async () => {
         if (monitorActiveRef.current) {
             await stopSmartMonitoring();
@@ -1708,7 +1603,7 @@ export default function RecordingScreen({ token, onLogout }) {
     const startSmartMonitoring = async () => {
         const perm = await Audio.requestPermissionsAsync();
         if (perm.status !== 'granted') {
-            Alert.alert('Permiso requerido', 'Activa el micrÃ³fono en Ajustes > Aplicaciones > EinsDream.');
+            Alert.alert('Permiso requerido', 'Activa el micrófono en Ajustes > Aplicaciones > EinsDream.');
             return;
         }
 
@@ -1782,13 +1677,13 @@ export default function RecordingScreen({ token, onLogout }) {
 
         const start = new Date(startTimeMs);
         const end   = new Date(endTimeMs);
-        // Descontar el tiempo en pausa: la noche solo cuenta el tiempo con micrÃ³fono activo
+        // Descontar el tiempo en pausa: la noche solo cuenta el tiempo con micrófono activo
         const effectiveDurationMs = Math.max(60000, endTimeMs - startTimeMs - totalPausedMs);
         const elapsedMinutes = Math.max(1, Math.round(effectiveDurationMs / 60000));
         // FIX v2.8.0: Usar fecha LOCAL con regla de madrugada (no UTC)
         const sessionDateStr  = getNightDate(startTimeMs);
 
-        // â”€â”€ 1. Save the continuous night recording to a permanent file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 1. Save the continuous night recording to a permanent file ──────────
         if (listenerRecRef.current) {
             try {
                 await listenerRecRef.current.stopAndUnloadAsync();
@@ -1804,7 +1699,7 @@ export default function RecordingScreen({ token, onLogout }) {
                         await FileSystem.copyAsync({ from: tempUri, to: destUri });
                     }
 
-                    // â”€â”€ 1.2 ReconciliaciÃ³n Dual si se monitoreÃ³ en Pareja (EinsDream Pair) â”€â”€â”€
+                    // ── 1.2 Reconciliación Dual si se monitoreó en Pareja (EinsDream Pair) ───
                     let pairReconcileData = null;
                     if (pairConfigRef.current?.isPair) {
                         try {
@@ -1827,8 +1722,8 @@ export default function RecordingScreen({ token, onLogout }) {
                     const isPairSession = !!pairConfigRef.current?.isPair;
                     const sessionRole = pairConfigRef.current?.role || 'left';
                     const nightLabel = isPairSession
-                        ? `ðŸ‘¥ Noche en Pareja (${sessionRole === 'left' ? 'Lado Izq' : 'Lado Der'}) - ${start.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}`
-                        : `ðŸŒ™ Noche del ${start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}`;
+                        ? `👥 Noche en Pareja (${sessionRole === 'left' ? 'Lado Izq' : 'Lado Der'}) - ${start.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                        : `🌙 Noche del ${start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}`;
                     
                     const metaIndex = await loadMetadataIndex();
                     metaIndex[filename] = {
@@ -1866,7 +1761,7 @@ export default function RecordingScreen({ token, onLogout }) {
         } catch (_) {}
         await refreshRecordings();
 
-        // â”€â”€ 2. Night Engine analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── 2. Night Engine analysis ────────────────────────────────────────────
         readNightHealthMetrics({ startTime: start, endTime: end }).then(async (healthData) => {
             const correlated = processNightEngineCorrelation({
                 audioEvents: capturedEvents,
@@ -1893,9 +1788,9 @@ export default function RecordingScreen({ token, onLogout }) {
             correlated.sessionDate      = sessionDateStr;
             correlated.pauseSegments    = capturedPauseSegments;
 
-            // FIX v2.9.8: Anclar SIEMPRE las horas reales de la pulsaciÃ³n de los botones.
-            // Esto garantiza que las estadÃ­sticas de sueÃ±o reflejen el tiempo REAL monitoreado
-            // y no los valores derivados o interpolados del motor de anÃ¡lisis.
+            // FIX v2.9.8: Anclar SIEMPRE las horas reales de la pulsación de los botones.
+            // Esto garantiza que las estadísticas de sueño reflejen el tiempo REAL monitoreado
+            // y no los valores derivados o interpolados del motor de análisis.
             correlated.startTime        = start.toISOString();
             correlated.endTime          = end.toISOString();
             correlated.startTimestamp   = startTimeMs;
@@ -1931,18 +1826,18 @@ export default function RecordingScreen({ token, onLogout }) {
                 : capturedEvents.filter(e => e.type === 'snore').length;
 
             Alert.alert(
-                isPairActive ? 'ðŸ‘¥ Noche en Pareja Registrada' : 'ðŸŒ™ Noche Registrada',
-                `DuraciÃ³n: ${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m\n` +
+                isPairActive ? '👥 Noche en Pareja Registrada' : '🌙 Noche Registrada',
+                `Duración: ${Math.floor(elapsedMinutes / 60)}h ${elapsedMinutes % 60}m\n` +
                 `Score: ${correlated.einsdreamScore.totalScore}/100\n\n` +
                 (isPairActive 
-                    ? `â€¢ Tus ronquidos aislados: ${mySnores}\nâ€¢ Ronquidos de tu pareja: ${partnerSnores}\nâ€¢ Ruido ambiente filtrado: ${pairSessionResult?.summary?.ambientEvents || 0}\n\n`
-                    : `â€¢ Eventos detectados: ${capturedEvents.length}\nâ€¢ Calidad acÃºstica: ${correlated.einsdreamScore.qualityScore}%\n\n`) +
-                `Audio nocturno guardado. Ve a la pestaÃ±a Score para revisar el balance completo.`
+                    ? `• Tus ronquidos aislados: ${mySnores}\n• Ronquidos de tu pareja: ${partnerSnores}\n• Ruido ambiente filtrado: ${pairSessionResult?.summary?.ambientEvents || 0}\n\n`
+                    : `• Eventos detectados: ${capturedEvents.length}\n• Calidad acústica: ${correlated.einsdreamScore.qualityScore}%\n\n`) +
+                `Audio nocturno guardado. Ve a la pestaña Score para revisar el balance completo.`
             );
         });
     };
 
-    // â”€â”€â”€ GrabaciÃ³n Continua Nocturna & DetecciÃ³n de Eventos (v2.4.0) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Grabación Continua Nocturna & Detección de Eventos (v2.4.0) ──────────
     const startNightRecording = async () => {
         if (!monitorActiveRef.current) return;
 
@@ -2061,7 +1956,7 @@ export default function RecordingScreen({ token, onLogout }) {
 
         const perm = await Audio.requestPermissionsAsync();
         if (perm.status !== 'granted') {
-            Alert.alert('Permiso denegado', 'Se necesita acceso al micrÃ³fono para la prueba.');
+            Alert.alert('Permiso denegado', 'Se necesita acceso al micrófono para la prueba.');
             return;
         }
 
@@ -2114,7 +2009,7 @@ export default function RecordingScreen({ token, onLogout }) {
                         const metaIndex = await loadMetadataIndex();
                         metaIndex[filename] = {
                             filename,
-                            label: 'ðŸŽ™ï¸ Prueba de MicrÃ³fono (5s)',
+                            label: '🎙️ Prueba de Micrófono (5s)',
                             eventType: 'test',
                             confidence: 100,
                             intensityDb: 75,
@@ -2132,12 +2027,12 @@ export default function RecordingScreen({ token, onLogout }) {
                             handlePlayPause({
                                 id: filename,
                                 uri: destUri,
-                                label: 'ðŸŽ™ï¸ Prueba de MicrÃ³fono (5s)',
+                                label: '🎙️ Prueba de Micrófono (5s)',
                                 filename,
                             });
                         }, 500);
 
-                        Alert.alert('ðŸŽ‰ Prueba Exitosa', 'Tu voz se estÃ¡ reproduciendo por el altavoz.');
+                        Alert.alert('🎉 Prueba Exitosa', 'Tu voz se está reproduciendo por el altavoz.');
                     } catch (err) {
                         Alert.alert('Error en prueba', err.message);
                     }
@@ -2164,9 +2059,9 @@ export default function RecordingScreen({ token, onLogout }) {
         setIsTesting(false);
     };
 
-    // â”€â”€â”€ Pausa de Privacidad â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Pausa el micrÃ³fono sin terminar la sesiÃ³n nocturna ni cambiar la fecha.
-    // El timer tambiÃ©n se pausa para que el tiempo privado NO cuente en la noche.
+    // ─── Pausa de Privacidad ──────────────────────────────────────────────────
+    // Pausa el micrófono sin terminar la sesión nocturna ni cambiar la fecha.
+    // El timer también se pausa para que el tiempo privado NO cuente en la noche.
     const pausePrivacyRecording = async () => {
         if (!monitorActiveRef.current || isRecordingPaused) return;
 
@@ -2182,7 +2077,7 @@ export default function RecordingScreen({ token, onLogout }) {
         });
 
         // FIX v2.8.0: Intentar pausar; si falla en Android (proceso background),
-        // dejar la grabaciÃ³n activa silenciosamente (el OS ya gestiona el buffer).
+        // dejar la grabación activa silenciosamente (el OS ya gestiona el buffer).
         if (listenerRecRef.current) {
             try {
                 await listenerRecRef.current.pauseAsync();
@@ -2196,8 +2091,8 @@ export default function RecordingScreen({ token, onLogout }) {
         setCurrentDb(-160);
         setIsCapturing(false);
 
-        // Persistir sesiÃ³n activa con originalStartTimeMs para que el resume
-        // pueda recuperar la sesiÃ³n aunque Android mate el proceso
+        // Persistir sesión activa con originalStartTimeMs para que el resume
+        // pueda recuperar la sesión aunque Android mate el proceso
         try {
             const dir = getBaseDir();
             await FileSystem.writeAsStringAsync(dir + 'einsdream_active_monitoring.json', JSON.stringify({
@@ -2213,7 +2108,7 @@ export default function RecordingScreen({ token, onLogout }) {
         } catch (_) {}
     };
 
-    // Reanuda el micrÃ³fono y el timer tras una pausa de privacidad.
+    // Reanuda el micrófono y el timer tras una pausa de privacidad.
     const resumePrivacyRecording = async () => {
         if (!monitorActiveRef.current || !isRecordingPaused) return;
 
@@ -2232,7 +2127,7 @@ export default function RecordingScreen({ token, onLogout }) {
         }
 
         // FIX v2.8.0: Reanudar el grabador activo.
-        // Si Android matÃ³ el proceso durante la pausa, `startAsync()` fallarÃ¡.
+        // Si Android mató el proceso durante la pausa, `startAsync()` fallará.
         // En ese caso iniciamos un segmento nuevo pero lo etiquetamos con el
         // startTimeMs ORIGINAL para que se guarde como parte de la misma noche.
         if (listenerRecRef.current) {
@@ -2240,7 +2135,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 await listenerRecRef.current.startAsync();
             } catch (rErr) {
                 console.warn('[resumePrivacyRecording startAsync failed, starting new segment]', rErr.message);
-                // Android matÃ³ el recorder â†’ nuevo segmento bajo el mismo sessionId
+                // Android mató el recorder → nuevo segmento bajo el mismo sessionId
                 try { listenerRecRef.current = null; } catch (_) {}
                 await startNightRecording();
             }
@@ -2270,13 +2165,13 @@ export default function RecordingScreen({ token, onLogout }) {
         } catch (_) {}
     };
 
-    // â”€â”€â”€ Sincronizar Solo EstadÃ­sticas con el Sistema Web â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // EnvÃ­a Ãºnicamente los datos de anÃ¡lisis (night-sessions) al backend.
+    // ─── Sincronizar Solo Estadísticas con el Sistema Web ─────────────────────
+    // Envía únicamente los datos de análisis (night-sessions) al backend.
     // NO sube archivos de audio.
     const syncStatsToServer = async () => {
         if (isSyncingStats) return;
         if (!token) {
-            Alert.alert('Sin sesiÃ³n', 'Inicia sesiÃ³n para sincronizar con el sistema web.');
+            Alert.alert('Sin sesión', 'Inicia sesión para sincronizar con el sistema web.');
             return;
         }
         setIsSyncingStats(true);
@@ -2295,7 +2190,7 @@ export default function RecordingScreen({ token, onLogout }) {
             let successCount = 0;
             for (const session of toSync.slice(0, 10)) {
                 try {
-                    // Formato EinsDream 3.0: Solo TelemetrÃ­a JSON (< 20 KB), CERO audio a la nube
+                    // Formato EinsDream 3.0: Solo Telemetría JSON (< 20 KB), CERO audio a la nube
                     const soundEvts = (session.soundEvents || session.correlatedEvents || []).map(e => ({
                         offsetMs: e.offsetMs !== undefined ? e.offsetMs : (e.relativeMs !== undefined ? e.relativeMs : 0),
                         timeLabel: e.timeLabel || '',
@@ -2343,36 +2238,36 @@ export default function RecordingScreen({ token, onLogout }) {
             }
 
             Alert.alert(
-                'âœ… Sincronizado con Sistema Web',
-                `${successCount} de ${Math.min(toSync.length, 10)} noches enviadas al dashboard (EinsDream 3.0 JSON TelemetrÃ­a).
-El sistema web ya puede procesar tus estadÃ­sticas.`
+                '✅ Sincronizado con Sistema Web',
+                `${successCount} de ${Math.min(toSync.length, 10)} noches enviadas al dashboard (EinsDream 3.0 JSON Telemetría).
+El sistema web ya puede procesar tus estadísticas.`
             );
         } catch (e) {
-            Alert.alert('Error de sincronizaciÃ³n', 'Verifica tu conexiÃ³n a internet.');
+            Alert.alert('Error de sincronización', 'Verifica tu conexión a internet.');
         } finally {
             setIsSyncingStats(false);
         }
     };
 
-    // â”€â”€â”€ Renderizado de PestaÃ±as â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Renderizado de Pestañas ──────────────────────────────────────────────
     return (
         <ScrollView contentContainerStyle={s.container} keyboardShouldPersistTaps="handled">
-            {/* Cabecera Principal con VersiÃ³n v2.3.2 */}
+            {/* Cabecera Principal con Versión v2.3.2 */}
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.8 (Date Dedup & Real Sleep Times Fix)</Text>
+                    <Text style={s.versionText}>v2.9.10 (Audio Real & UTF-8 Fix)</Text>
                 </View>
             </View>
 
-            {/* Selector de PestaÃ±as (Segmented Control) */}
+            {/* Selector de Pestañas (Segmented Control) */}
             <View style={s.tabBar}>
                 <TouchableOpacity
                     style={[s.tabItem, activeTab === 'monitoring' && s.tabItemActive]}
                     onPress={() => setActiveTab('monitoring')}
                 >
                     <Text style={[s.tabText, activeTab === 'monitoring' && s.tabTextActive]}>
-                        ðŸŒ™ Monitoreo
+                        🌙 Monitoreo
                     </Text>
                 </TouchableOpacity>
 
@@ -2381,7 +2276,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                     onPress={() => setActiveTab('score')}
                 >
                     <Text style={[s.tabText, activeTab === 'score' && s.tabTextActive]}>
-                        ðŸ“Š Score
+                        📊 Score
                     </Text>
                 </TouchableOpacity>
 
@@ -2390,7 +2285,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                     onPress={() => setActiveTab('prediction')}
                 >
                     <Text style={[s.tabText, activeTab === 'prediction' && s.tabTextActive]}>
-                        ðŸ”® PredicciÃ³n
+                        🔮 Predicción
                     </Text>
                 </TouchableOpacity>
 
@@ -2399,25 +2294,25 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                     onPress={() => setActiveTab('recordings')}
                 >
                     <Text style={[s.tabText, activeTab === 'recordings' && s.tabTextActive]}>
-                        ðŸŽ§ Audios ({localRecordings.length})
+                        🎧 Audios ({localRecordings.length})
                     </Text>
                 </TouchableOpacity>
             </View>
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-            {/* PESTAÃ‘A 1: ðŸŒ™ MONITOREO NOCTURNO ACTIVO                           */}
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* PESTAÑA 1: 🌙 MONITOREO NOCTURNO ACTIVO                           */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'monitoring' && (
                 <View>
-                    {/* Tarjeta de FilosofÃ­a */}
+                    {/* Tarjeta de Filosofía */}
                     <View style={s.infoCard}>
-                        <Text style={s.infoTitle}>ðŸŒ™ EinsDream 2026: IA AcÃºstica On-Device</Text>
+                        <Text style={s.infoTitle}>🌙 EinsDream 2026: IA Acústica On-Device</Text>
                         <Text style={s.infoText}>
-                            EinsDream graba <Text style={{ fontWeight: '700' }}>toda la noche en baja calidad (32 kbps)</Text> para generar un audio continuo. Durante el sueÃ±o detecta eventos acÃºsticos (ronquidos, tos, respiraciÃ³n) y los marca en la lÃ­nea de tiempo del audio. El audio queda en tu telÃ©fono y tÃº decides cuÃ¡ndo eliminarlo.
+                            EinsDream graba <Text style={{ fontWeight: '700' }}>toda la noche en baja calidad (32 kbps)</Text> para generar un audio continuo. Durante el sueño detecta eventos acústicos (ronquidos, tos, respiración) y los marca en la línea de tiempo del audio. El audio queda en tu teléfono y tú decides cuándo eliminarlo.
                         </Text>
                         <View style={s.quotaRow}>
                             <Text style={s.quotaText}>
-                                ðŸ’¾ Memoria protegida: <Text style={{ fontWeight: '800', color: '#38bdf8' }}>{usedStorageMb} MB</Text> / {MAX_STORAGE_MB} MB
+                                💾 Memoria protegida: <Text style={{ fontWeight: '800', color: '#38bdf8' }}>{usedStorageMb} MB</Text> / {MAX_STORAGE_MB} MB
                             </Text>
                             <Text style={s.quotaSub}>Almacenamiento seguro interno</Text>
                         </View>
@@ -2431,15 +2326,15 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                         ]}>
                             <Text style={s.bannerTitle}>
                                 {isRecordingPaused
-                                    ? 'ðŸ”’ PRIVACIDAD ACTIVA â€” MICRÃ“FONO PAUSADO'
-                                    : (isCapturing ? 'ðŸ”´ Â¡EVENTO SONORO DETECTADO!' : 'ðŸŸ¢ ESCUCHANDO EN SILENCIO')}
+                                    ? '🔒 PRIVACIDAD ACTIVA — MICRÓFONO PAUSADO'
+                                    : (isCapturing ? '🔴 ¡EVENTO SONORO DETECTADO!' : '🟢 ESCUCHANDO EN SILENCIO')}
                             </Text>
                             <Text style={s.bannerSub}>
                                 {isRecordingPaused
-                                    ? 'La grabaciÃ³n estÃ¡ pausada. La sesiÃ³n nocturna continÃºa sin registrar audio.'
+                                    ? 'La grabación está pausada. La sesión nocturna continúa sin registrar audio.'
                                     : (isCapturing
                                         ? 'Analizando con IA local y guardando evento...'
-                                        : `Sensor activo (${currentDb} dB) Â· Tiempo: ${fmtTime(monitorSeconds)}`)}
+                                        : `Sensor activo (${currentDb} dB) · Tiempo: ${fmtTime(monitorSeconds)}`)}
                             </Text>
 
                             {!isRecordingPaused && (
@@ -2457,16 +2352,16 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                             )}
 
                             <View style={s.statsGrid}>
-                                <Text style={s.statBadge}>ðŸ˜´ Ronquidos: {nightStats.snore}</Text>
-                                <Text style={s.statBadge}>ðŸ« Resp: {nightStats.breathing}</Text>
-                                <Text style={s.statBadge}>ðŸ¤§ Tos: {nightStats.cough}</Text>
-                                <Text style={s.statBadge}>ðŸ—£ï¸ Voz: {nightStats.voice}</Text>
+                                <Text style={s.statBadge}>😴 Ronquidos: {nightStats.snore}</Text>
+                                <Text style={s.statBadge}>🫁 Resp: {nightStats.breathing}</Text>
+                                <Text style={s.statBadge}>🤧 Tos: {nightStats.cough}</Text>
+                                <Text style={s.statBadge}>🗣️ Voz: {nightStats.voice}</Text>
                             </View>
 
                             {pairConfig?.isPair && (
                                 <View style={s.pairMonitoringBadge}>
                                     <Text style={s.pairMonitoringTxt}>
-                                        ðŸ‘¥ Modo Pareja Activo Â· {pairConfig.role === 'left' ? 'ðŸ›ï¸ Lado Izquierdo' : 'ðŸ›ï¸ Lado Derecho'} Â· CÃ³digo: {pairConfig.roomCode}
+                                        👥 Modo Pareja Activo · {pairConfig.role === 'left' ? '🛏️ Lado Izquierdo' : '🛏️ Lado Derecho'} · Código: {pairConfig.roomCode}
                                     </Text>
                                 </View>
                             )}
@@ -2477,72 +2372,72 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                     {isTesting && (
                         <View style={[s.banner, { borderColor: '#ef4444', backgroundColor: '#450a0a' }]}>
                             <Text style={[s.bannerTitle, { color: '#f87171' }]}>
-                                ðŸŽ™ï¸ GRABANDO PRUEBA ({testCountdown}s) â€” Â¡Habla ahora!
+                                🎙️ GRABANDO PRUEBA ({testCountdown}s) — ¡Habla ahora!
                             </Text>
                             <Text style={[s.bannerSub, { color: '#fca5a5' }]}>
-                                Tu voz se guardarÃ¡ y se reproducirÃ¡ al terminar.
+                                Tu voz se guardará y se reproducirá al terminar.
                             </Text>
                         </View>
                     )}
 
-                    {/* BotÃ³n Principal de Monitoreo */}
+                    {/* Botón Principal de Monitoreo */}
                     <TouchableOpacity
                         style={[s.mainBtn, isMonitoring ? s.mainBtnStop : s.mainBtnStart]}
                         onPress={toggleSmartMonitoring}
                         disabled={isTesting}
                     >
                         <Text style={s.mainBtnText}>
-                            {isMonitoring ? 'â¹ DETENER MONITOREO NOCTURNO' : 'ðŸŒ™ INICIAR MONITOREO INTELIGENTE'}
+                            {isMonitoring ? '⏹ DETENER MONITOREO NOCTURNO' : '🌙 INICIAR MONITOREO INTELIGENTE'}
                         </Text>
                         <Text style={s.mainBtnSub}>
                             {isMonitoring
                                 ? 'Finalizar noche y calcular Einsdream Score'
-                                : 'Escucha continua Â· Detecta ronquidos, tos y respiraciÃ³n'}
+                                : 'Escucha continua · Detecta ronquidos, tos y respiración'}
                         </Text>
                     </TouchableOpacity>
 
-                    {/* BotÃ³n de Acceso RÃ¡pido a Monitoreo en Pareja */}
+                    {/* Botón de Acceso Rápido a Monitoreo en Pareja */}
                     {!isMonitoring && (
                         <TouchableOpacity
                             style={s.pairShortcutBtn}
                             onPress={() => setPairModalVisible(true)}
                         >
-                            <Text style={s.pairShortcutIcon}>ðŸ‘¥</Text>
+                            <Text style={s.pairShortcutIcon}>👥</Text>
                             <View style={{ flex: 1 }}>
                                 <Text style={s.pairShortcutTitle}>EinsDream Pair (2 Celulares)</Text>
                                 <Text style={s.pairShortcutSub}>
                                     {pairConfig?.isPair
                                         ? `Configurado: ${pairConfig.role === 'left' ? 'Lado Izquierdo' : 'Lado Derecho'} (Sala ${pairConfig.roomCode})`
-                                        : 'Sincroniza dos telÃ©fonos para separar y aislar ronquidos'}
+                                        : 'Sincroniza dos teléfonos para separar y aislar ronquidos'}
                                 </Text>
                             </View>
-                            <Text style={s.pairShortcutArrow}>â†’</Text>
+                            <Text style={s.pairShortcutArrow}>→</Text>
                         </TouchableOpacity>
                     )}
 
-                    {/* BotÃ³n de Pausa de Privacidad â€” solo visible durante monitoreo activo */}
+                    {/* Botón de Pausa de Privacidad — solo visible durante monitoreo activo */}
                     {isMonitoring && (
                         <TouchableOpacity
                             style={[s.pausePrivacyBtn, isRecordingPaused && s.pausePrivacyBtnActive]}
                             onPress={isRecordingPaused ? resumePrivacyRecording : pausePrivacyRecording}
                         >
                             <Text style={s.pausePrivacyIcon}>
-                                {isRecordingPaused ? 'ðŸŽ™ï¸' : 'ðŸ”’'}
+                                {isRecordingPaused ? '🎙️' : '🔒'}
                             </Text>
                             <View style={{ flex: 1 }}>
                                 <Text style={s.pausePrivacyText}>
-                                    {isRecordingPaused ? 'â–¶ Reanudar GrabaciÃ³n' : 'â¸ Pausa de Privacidad'}
+                                    {isRecordingPaused ? '▶ Reanudar Grabación' : '⏸ Pausa de Privacidad'}
                                 </Text>
                                 <Text style={s.pausePrivacySub}>
                                     {isRecordingPaused
-                                        ? 'Reactivar micrÃ³fono Â· La noche sigue sin cambio de fecha'
-                                        : 'Silenciar micrÃ³fono sin terminar la pernoctaciÃ³n'}
+                                        ? 'Reactivar micrófono · La noche sigue sin cambio de fecha'
+                                        : 'Silenciar micrófono sin terminar la pernoctación'}
                                 </Text>
                             </View>
                         </TouchableOpacity>
                     )}
 
-                    {/* BotÃ³n de Prueba de MicrÃ³fono */}
+                    {/* Botón de Prueba de Micrófono */}
                     <TouchableOpacity
                         style={[s.testBtn, (isTesting || isMonitoring) && { opacity: 0.6 }]}
                         onPress={runVoiceTest}
@@ -2551,15 +2446,15 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                         {isTesting ? (
                             <ActivityIndicator color="#fbbf24" />
                         ) : (
-                            <Text style={s.testBtnText}>ðŸŽ™ Probar micrÃ³fono (grabar 5 seg de voz)</Text>
+                            <Text style={s.testBtnText}>🎙 Probar micrófono (grabar 5 seg de voz)</Text>
                         )}
                     </TouchableOpacity>
                 </View>
             )}
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-            {/* PESTAÃ‘A 2: ðŸ“Š EINSDREAM SCORE & DIMENSIONES                       */}
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* PESTAÑA 2: 📊 EINSDREAM SCORE & DIMENSIONES                       */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'score' && (
                 <View>
                     {isEvaluating ? (
@@ -2576,7 +2471,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                         style={s.recalcBtn}
                                         onPress={() => reloadTrendsAndPredictions(sleepProfile)}
                                     >
-                                        <Text style={s.recalcBtnText}>ðŸ”„ Actualizar</Text>
+                                        <Text style={s.recalcBtnText}>🔄 Actualizar</Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         style={[s.recalcBtn, { backgroundColor: '#1e3a8a', borderColor: '#3b82f6' }]}
@@ -2586,7 +2481,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                         {isSyncingStats ? (
                                             <ActivityIndicator size="small" color="#93c5fd" />
                                         ) : (
-                                            <Text style={[s.recalcBtnText, { color: '#93c5fd' }]}>â˜ Sincronizar</Text>
+                                            <Text style={[s.recalcBtnText, { color: '#93c5fd' }]}>☁ Sincronizar</Text>
                                         )}
                                     </TouchableOpacity>
                                 </View>
@@ -2595,7 +2490,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                             {/* Tarjeta de los 3 Pilares con Einsdream Score */}
                             <ThreePillarsCard scoreData={nightAnalysis.einsdreamScore} />
 
-                            {/* Tarjeta de Impacto del AcompaÃ±ante (Monitoreo Dual con 2 Celulares) */}
+                            {/* Tarjeta de Impacto del Acompañante (Monitoreo Dual con 2 Celulares) */}
                             {(nightAnalysis.pairData || pairSessionResult) && (
                                 <PartnerImpactCard
                                     pairData={nightAnalysis.pairData || pairSessionResult}
@@ -2603,8 +2498,8 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                 />
                             )}
 
-                            {/* Diales Circulares (DuraciÃ³n con DÃ©ficit, SueÃ±o Profundo, Regularidad, Eficiencia) */}
-                            <Text style={s.sectionHeader}>â±ï¸ Diales de Eficiencia y Salud</Text>
+                            {/* Diales Circulares (Duración con Déficit, Sueño Profundo, Regularidad, Eficiencia) */}
+                            <Text style={s.sectionHeader}>⏱️ Diales de Eficiencia y Salud</Text>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.dialsScroll}>
                                 <CircularDial
                                     value={
@@ -2618,10 +2513,10 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             : `-${Math.floor(Math.abs(nightAnalysis.einsdreamScore?.deficitMinutes || 41) / 60)}:${String(Math.abs(nightAnalysis.einsdreamScore?.deficitMinutes || 41) % 60).padStart(2, '0')}`
                                     }
                                     subPositive={nightAnalysis.einsdreamScore?.deficitMinutes >= 0}
-                                    label="DuraciÃ³n / DÃ©ficit"
+                                    label="Duración / Déficit"
                                     percentage={nightAnalysis.dimensions?.duration || 85}
                                     color="#38bdf8"
-                                    icon="â±ï¸"
+                                    icon="⏱️"
                                 />
 
                                 <CircularDial
@@ -2632,20 +2527,20 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             : '2:47'
                                     }
                                     subPositive={true}
-                                    label="SueÃ±o Profundo"
+                                    label="Sueño Profundo"
                                     percentage={nightAnalysis.dimensions?.deepSleep || 78}
                                     color="#10b981"
-                                    icon="ðŸŒ™"
+                                    icon="🌙"
                                 />
 
                                 <CircularDial
                                     value={`0:${String(nightAnalysis.einsdreamScore?.irregularityMinutes || 15).padStart(2, '0')}`}
-                                    subValue="DesvÃ­o"
+                                    subValue="Desvío"
                                     subPositive={nightAnalysis.einsdreamScore?.irregularityMinutes <= 30}
                                     label="Irregularidad"
                                     percentage={nightAnalysis.dimensions?.regularity || 90}
                                     color="#f59e0b"
-                                    icon="ðŸ”„"
+                                    icon="🔄"
                                 />
 
                                 <CircularDial
@@ -2655,17 +2550,17 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                     label="Eficiencia Cama"
                                     percentage={nightAnalysis.dimensions?.efficiency || 92}
                                     color="#a855f7"
-                                    icon="ðŸŽ¯"
+                                    icon="🎯"
                                 />
 
                                 <CircularDial
                                     value={`${nightAnalysis.dimensions?.acousticPeace || 95}%`}
                                     subValue={`${nightAnalysis.snoreMetrics?.snorePercentage || 0}% ronq`}
                                     subPositive={nightAnalysis.snoreMetrics?.snorePercentage <= 8}
-                                    label="Paz AcÃºstica"
+                                    label="Paz Acústica"
                                     percentage={nightAnalysis.dimensions?.acousticPeace || 95}
                                     color="#34d399"
-                                    icon="ðŸ˜´"
+                                    icon="😴"
                                 />
                             </ScrollView>
 
@@ -2678,7 +2573,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                 sleepBreakdown={nightAnalysis.sleepBreakdown}
                             />
 
-                            {/* ActigrafÃ­a y Registro AcÃºstico */}
+                            {/* Actigrafía y Registro Acústico */}
                             <ActigraphyChart
                                 snoreCount={nightAnalysis.snoreMetrics?.snoreEventsCount || 0}
                                 coughCount={nightAnalysis.snoreMetrics?.coughEventsCount || 0}
@@ -2689,7 +2584,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                         </View>
                     ) : (
                         <View style={s.emptyBox}>
-                            <Text style={s.emptyTitle}>Sin noches registradas aÃºn</Text>
+                            <Text style={s.emptyTitle}>Sin noches registradas aún</Text>
                             <Text style={s.emptyText}>
                                 {'Tu Einsdream Score y dimensiones se calculan a partir de tus noches reales monitoreadas. Activa el monitoreo nocturno antes de dormir y presiona "Detener" al despertar.'}
                             </Text>
@@ -2704,20 +2599,20 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                 </View>
             )}
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-            {/* PESTAÃ‘A 3: ðŸ”® PREDICCIÃ“N & HÃBITOS                                */}
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* PESTAÑA 3: 🔮 PREDICCIÓN & HÁBITOS                                */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'prediction' && (
                 <View>
                     {/* Tarjeta de Sleep Test y Perfil Basal */}
                     <View style={s.baselineCard}>
                         <View style={s.baselineHead}>
                             <View>
-                                <Text style={s.baselineTitle}>ðŸ“‹ Tu Perfil de Referencia</Text>
+                                <Text style={s.baselineTitle}>📋 Tu Perfil de Referencia</Text>
                                 <Text style={s.baselineSub}>
                                     Cronotipo: <Text style={{ fontWeight: '800', color: '#38bdf8' }}>
-                                        {sleepProfile.chronotype === 'early_bird' ? 'Madrugador (Alondra)' : (sleepProfile.chronotype === 'night_owl' ? 'NoctÃ¡mbulo (BÃºho)' : 'Intermedio')}
-                                    </Text> Â· Meta: {Math.floor(sleepProfile.targetSleepMinutes / 60)} horas
+                                        {sleepProfile.chronotype === 'early_bird' ? 'Madrugador (Alondra)' : (sleepProfile.chronotype === 'night_owl' ? 'Noctámbulo (Búho)' : 'Intermedio')}
+                                    </Text> · Meta: {Math.floor(sleepProfile.targetSleepMinutes / 60)} horas
                                 </Text>
                             </View>
                             <TouchableOpacity
@@ -2732,19 +2627,19 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                         </Text>
                     </View>
 
-                    {/* Tarjeta de RecomendaciÃ³n de Horario Ã“ptimo (Modelo Predictivo) */}
+                    {/* Tarjeta de Recomendación de Horario Óptimo (Modelo Predictivo) */}
                     {optimalBedtimeData && (
                         <View style={s.predictCard}>
                             <View style={s.predictBadge}>
-                                <Text style={s.predictBadgeText}>ðŸ”® MODELO CIRCADIANO PERSONALIZADO</Text>
+                                <Text style={s.predictBadgeText}>🔮 MODELO CIRCADIANO PERSONALIZADO</Text>
                             </View>
-                            <Text style={s.predictTitle}>Hora Ã“ptima para Dormir Hoy</Text>
+                            <Text style={s.predictTitle}>Hora Óptima para Dormir Hoy</Text>
                             <View style={s.predictTimesRow}>
                                 <View style={s.predictTimeCol}>
                                     <Text style={s.predictTimeBig}>{optimalBedtimeData.recommendedBedtime}</Text>
                                     <Text style={s.predictTimeLabel}>Hora sugerida de acostarse</Text>
                                 </View>
-                                <Text style={{ fontSize: 24, color: '#64748b' }}>â†’</Text>
+                                <Text style={{ fontSize: 24, color: '#64748b' }}>→</Text>
                                 <View style={s.predictTimeCol}>
                                     <Text style={s.predictTimeBig}>{optimalBedtimeData.recommendedWakeTime}</Text>
                                     <Text style={s.predictTimeLabel}>Despertar objetivo</Text>
@@ -2753,10 +2648,10 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
 
                             <View style={s.predictProjectionRow}>
                                 <Text style={s.predictProjItem}>
-                                    ðŸŽ¯ Meta de Descanso: <Text style={{ color: '#38bdf8', fontWeight: '800' }}>{optimalBedtimeData.targetSleepHours || '8 horas'}</Text>
+                                    🎯 Meta de Descanso: <Text style={{ color: '#38bdf8', fontWeight: '800' }}>{optimalBedtimeData.targetSleepHours || '8 horas'}</Text>
                                 </Text>
                                 <Text style={s.predictProjItem}>
-                                    ðŸ§¬ CalibraciÃ³n: <Text style={{ color: '#10b981', fontWeight: '800' }}>{optimalBedtimeData.algorithmUsed || 'Cronotipo'}</Text>
+                                    🧬 Calibración: <Text style={{ color: '#10b981', fontWeight: '800' }}>{optimalBedtimeData.algorithmUsed || 'Cronotipo'}</Text>
                                 </Text>
                             </View>
 
@@ -2766,15 +2661,15 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                         </View>
                     )}
 
-                    {/* Benchmarking de Tendencias: 7 y 28 DÃ­as */}
+                    {/* Benchmarking de Tendencias: 7 y 28 Días */}
                     {trendsData && trendsData.summary && (
                         <View style={s.benchCard}>
-                            <Text style={s.benchTitle}>ðŸ“ˆ Benchmarking de Tendencias</Text>
-                            <Text style={s.benchSub}>Comparativa de horas dormidas vs tu lÃ­nea base</Text>
+                            <Text style={s.benchTitle}>📈 Benchmarking de Tendencias</Text>
+                            <Text style={s.benchSub}>Comparativa de horas dormidas vs tu línea base</Text>
 
                             <View style={s.benchMetricsGrid}>
                                 <View style={s.benchBox}>
-                                    <Text style={s.benchBoxLabel}>Promedio 7 DÃ­as</Text>
+                                    <Text style={s.benchBoxLabel}>Promedio 7 Días</Text>
                                     <Text style={s.benchBoxVal}>{trendsData.summary.last7Days.avgSleepHoursFormatted}</Text>
                                     <Text style={[s.benchDelta, { color: trendsData.summary.last7Days.varianceVsBaselinePct >= 0 ? '#34d399' : '#f87171' }]}>
                                         {trendsData.summary.last7Days.varianceVsBaselinePct >= 0 ? '+' : ''}{trendsData.summary.last7Days.varianceVsBaselinePct}% vs baseline
@@ -2782,7 +2677,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                 </View>
 
                                 <View style={s.benchBox}>
-                                    <Text style={s.benchBoxLabel}>Promedio 28 DÃ­as</Text>
+                                    <Text style={s.benchBoxLabel}>Promedio 28 Días</Text>
                                     <Text style={s.benchBoxVal}>{trendsData.summary.last28Days.avgSleepHoursFormatted}</Text>
                                     <Text style={[s.benchDelta, { color: trendsData.summary.last28Days.varianceVsBaselinePct >= 0 ? '#34d399' : '#f87171' }]}>
                                         {trendsData.summary.last28Days.varianceVsBaselinePct >= 0 ? '+' : ''}{trendsData.summary.last28Days.varianceVsBaselinePct}% vs baseline
@@ -2792,12 +2687,12 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
 
                             {/* Tabla Comparativa de Noches Registradas */}
                             <Text style={[s.benchTitle, { marginTop: 16, fontSize: 13 }]}>
-                                ðŸ—“ï¸ Registro Comparativo por Noches
+                                🗓️ Registro Comparativo por Noches
                             </Text>
                             <View style={s.tableHeader}>
                                 <Text style={[s.th, { flex: 2 }]}>Noche</Text>
                                 <Text style={[s.th, { flex: 2.2 }]}>Horario</Text>
-                                <Text style={[s.th, { flex: 2 }]}>DuraciÃ³n</Text>
+                                <Text style={[s.th, { flex: 2 }]}>Duración</Text>
                                 <Text style={[s.th, { flex: 1.8 }]}>Eventos</Text>
                                 <Text style={[s.th, { flex: 2 }]}>Calidad</Text>
                             </View>
@@ -2819,7 +2714,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             ) : null}
                                         </View>
                                         <Text style={[s.td, { flex: 1.8, color: '#f1f5f9' }]}>{item.eventsCount}</Text>
-                                        <Text style={[s.td, { flex: 2, fontWeight: '700', color: item.quality === 'Ã“ptima' || item.quality === 'Tranquila' ? '#34d399' : (item.quality === 'Regular' || item.quality === 'Moderada' ? '#f59e0b' : '#f87171') }]}>
+                                        <Text style={[s.td, { flex: 2, fontWeight: '700', color: item.quality === 'Óptima' || item.quality === 'Tranquila' ? '#34d399' : (item.quality === 'Regular' || item.quality === 'Moderada' ? '#f59e0b' : '#f87171') }]}>
                                             {item.quality}
                                         </Text>
                                     </View>
@@ -2827,7 +2722,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                             ) : (
                                 <View style={{ paddingVertical: 18, alignItems: 'center' }}>
                                     <Text style={{ color: '#94a3b8', fontSize: 12, textAlign: 'center', lineHeight: 18 }}>
-                                        AÃºn no hay noches registradas en el historial. Tu primera noche se guardarÃ¡ automÃ¡ticamente con su duraciÃ³n y audios al presionar "Detener Monitoreo".
+                                        Aún no hay noches registradas en el historial. Tu primera noche se guardará automáticamente con su duración y audios al presionar "Detener Monitoreo".
                                     </Text>
                                 </View>
                             )}
@@ -2836,12 +2731,12 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                 </View>
             )}
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-            {/* PESTAÃ‘A 4: ðŸŽ§ GRABACIONES & AUDIOS LOCALES                        */}
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* PESTAÑA 4: 🎧 GRABACIONES & AUDIOS LOCALES                        */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'recordings' && (() => {
-                // FIX v2.9.8: Deduplicar por sessionDate â€” si hay archivo local + nube con la misma fecha
-                // se quedan con el que tiene mÃ¡s informaciÃ³n (prioridad: tiene URI local real > solo nube)
+                // FIX v2.9.8: Deduplicar por sessionDate — si hay archivo local + nube con la misma fecha
+                // se quedan con el que tiene más información (prioridad: tiene URI local real > solo nube)
                 const allNightRaw = [...localRecordings]
                     .filter(r => r.isNightSession || r.sessionDate || (r.soundEvents && r.soundEvents.length > 0))
                     .sort((a, b) => (b.modTime || b.startTimestamp || 0) - (a.modTime || a.startTimestamp || 0));
@@ -2873,12 +2768,12 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
 
                 return (
                     <View style={s.recCard}>
-                        {/* â”€â”€â”€ Cabecera de la PestaÃ±a â”€â”€â”€ */}
+                        {/* ─── Cabecera de la Pestaña ─── */}
                         <View style={s.recHeader}>
                             <View style={{ flex: 1 }}>
-                                <Text style={[s.recTitle, { fontSize: 18 }]}>ðŸŽ§ Audios Nocturnos</Text>
+                                <Text style={[s.recTitle, { fontSize: 18 }]}>🎧 Audios Nocturnos</Text>
                                 <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
-                                    ReproducciÃ³n de sonido ambiental y eventos acÃºsticos detectados
+                                    Reproducción de sonido ambiental y eventos acústicos detectados
                                 </Text>
                             </View>
                             <TouchableOpacity
@@ -2886,7 +2781,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                 onPress={refreshRecordings}
                                 disabled={loadingRecs}
                             >
-                                <Text style={{ fontSize: 14, color: '#38bdf8', fontWeight: '700' }}>ðŸ”„ Actualizar</Text>
+                                <Text style={{ fontSize: 14, color: '#38bdf8', fontWeight: '700' }}>🔄 Actualizar</Text>
                             </TouchableOpacity>
                         </View>
 
@@ -2894,21 +2789,21 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                             <ActivityIndicator size="large" color="#38bdf8" style={{ marginVertical: 36 }} />
                         ) : nightRecordings.length === 0 && otherRecordings.length === 0 ? (
                             <View style={s.emptyBox}>
-                                <Text style={s.emptyTitle}>AÃºn no hay grabaciones</Text>
+                                <Text style={s.emptyTitle}>Aún no hay grabaciones</Text>
                                 <Text style={s.emptyText}>
                                     Activa el monitoreo nocturno y pulsa Detener al despertar para guardar el audio.
                                 </Text>
                             </View>
                         ) : (
                             <View>
-                                {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                                {/* ══════════════════════════════════════════════════════════════════════ */}
                                 {/* 1. SELECTOR SUPERIOR DE NOCHES (GIGANTE, ACCESIBLE ADULTOS MAYORES)  */}
-                                {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                                {/* ══════════════════════════════════════════════════════════════════════ */}
                                 {nightRecordings.length > 0 && (
                                     <View style={{ marginBottom: 16 }}>
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                             <Text style={{ color: '#cbd5e1', fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                                ðŸ“… Selecciona la Noche:
+                                                📅 Selecciona la Noche:
                                             </Text>
                                             <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '700' }}>
                                                 {safeIndex + 1} de {nightRecordings.length} noches
@@ -2969,7 +2864,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             })}
                                         </ScrollView>
 
-                                        {/* Botones de navegaciÃ³n rÃ¡pida Anterior / Siguiente */}
+                                        {/* Botones de navegación rápida Anterior / Siguiente */}
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
                                             <TouchableOpacity
                                                 disabled={safeIndex >= nightRecordings.length - 1}
@@ -2990,7 +2885,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 }}
                                             >
                                                 <Text style={{ color: safeIndex >= nightRecordings.length - 1 ? '#475569' : '#cbd5e1', fontSize: 12, fontWeight: '700' }}>
-                                                    â—€ Noche Anterior
+                                                    ◀ Noche Anterior
                                                 </Text>
                                             </TouchableOpacity>
 
@@ -3013,14 +2908,14 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 }}
                                             >
                                                 <Text style={{ color: safeIndex <= 0 ? '#475569' : '#cbd5e1', fontSize: 12, fontWeight: '700' }}>
-                                                    Noche Siguiente â–¶
+                                                    Noche Siguiente ▶
                                                 </Text>
                                             </TouchableOpacity>
                                         </View>
                                     </View>
                                 )}
 
-                                {/* â”€â”€â”€ 2. REPRODUCTOR PRINCIPAL DE LA NOCHE ACTIVA (SENIOR-FRIENDLY CON LÃNEA DE TIEMPO) â”€â”€â”€ */}
+                                {/* ─── 2. REPRODUCTOR PRINCIPAL DE LA NOCHE ACTIVA (SENIOR-FRIENDLY CON LÍNEA DE TIEMPO) ─── */}
                                 {currentNight && (
                                     <View style={{
                                         backgroundColor: '#0f172a',
@@ -3037,7 +2932,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     {currentNight.label || `Noche ${currentNight.sessionDate}`}
                                                 </Text>
                                                 <Text style={{ color: '#94a3b8', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
-                                                    ðŸš€ Inicio: {new Date(currentNight.startTimestamp || currentNight.modTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs Â· â± DuraciÃ³n: {fmtMs(nightDurationMs)} Â· {currentNight.eventsCount || (currentNight.soundEvents ? currentNight.soundEvents.length : 0)} eventos acÃºsticos registrados
+                                                    🚀 Inicio: {new Date(currentNight.startTimestamp || currentNight.modTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs · ⏱ Duración: {fmtMs(nightDurationMs)} · {currentNight.eventsCount || (currentNight.soundEvents ? currentNight.soundEvents.length : 0)} eventos acústicos registrados
                                                 </Text>
                                             </View>
 
@@ -3059,7 +2954,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             )}
                                         </View>
 
-                                        {/* BOTÃ“N MAESTRO DE REPRODUCCIÃ“N (GIGANTE PARA ADULTO MAYOR) */}
+                                        {/* BOTÓN MAESTRO DE REPRODUCCIÓN (GIGANTE PARA ADULTO MAYOR) */}
                                         <TouchableOpacity
                                             activeOpacity={0.8}
                                             onPress={() => handlePlayPause(currentNight)}
@@ -3078,32 +2973,32 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             }}
                                         >
                                             <Text style={{ fontSize: 24, color: '#ffffff', marginRight: 4 }}>
-                                                {isPlayingCurrent ? 'â¸' : 'â–¶'}
+                                                {isPlayingCurrent ? '⏸' : '▶'}
                                             </Text>
                                             <Text style={{ color: '#ffffff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 }}>
-                                                {isPlayingCurrent ? 'PAUSAR REPRODUCCIÃ“N' : 'REPRODUCIR AUDIO DE ESTA NOCHE'}
+                                                {isPlayingCurrent ? 'PAUSAR REPRODUCCIÓN' : 'REPRODUCIR AUDIO DE ESTA NOCHE'}
                                             </Text>
                                         </TouchableOpacity>
 
-                                        {/* TIEMPO TRANSCURRIDO Y TOTAL (NÃšMEROS GIGANTES) */}
+                                        {/* TIEMPO TRANSCURRIDO Y TOTAL (NÚMEROS GIGANTES) */}
                                         <View style={{ alignItems: 'center', marginTop: 6, marginBottom: 4 }}>
                                             <Text style={{ color: '#38bdf8', fontSize: 22, fontWeight: '900', letterSpacing: 1.5, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
                                                 {fmtMs(isSelected ? posMs : 0)} / {fmtMs(nightDurationMs)}
                                             </Text>
                                         </View>
 
-                                        {/* â”€â”€â”€ LÃNEA DE TIEMPO INTERACTIVA CON EVENTOS ACÃšSTICOS â”€â”€â”€ */}
+                                        {/* ─── LÍNEA DE TIEMPO INTERACTIVA CON EVENTOS ACÚSTICOS ─── */}
                                         <View style={{ marginVertical: 10 }}>
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                                 <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                                    ðŸ“ˆ LÃ­nea de Tiempo Â· Toca la barra o un evento
+                                                    📈 Línea de Tiempo · Toca la barra o un evento
                                                 </Text>
                                                 <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '700' }}>
-                                                    {currentNight.soundEvents ? currentNight.soundEvents.length : 0} Eventos acÃºsticos
+                                                    {currentNight.soundEvents ? currentNight.soundEvents.length : 0} Eventos acústicos
                                                 </Text>
                                             </View>
 
-                                            {/* Barra fÃ­sica de la timeline */}
+                                            {/* Barra física de la timeline */}
                                             <View style={{
                                                 height: 44,
                                                 backgroundColor: '#172033',
@@ -3126,7 +3021,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     borderRadius: 12
                                                 }} />
 
-                                                {/* Ãrea de toque para viajar / seek por toda la noche */}
+                                                {/* Área de toque para viajar / seek por toda la noche */}
                                                 <TouchableOpacity
                                                     style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 10 }}
                                                     activeOpacity={0.9}
@@ -3145,7 +3040,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     }}
                                                 />
 
-                                                {/* Puntos de eventos acÃºsticos en la noche */}
+                                                {/* Puntos de eventos acústicos en la noche */}
                                                 {currentNight.soundEvents && currentNight.soundEvents.map((evt, idx) => {
                                                     const evOffset = (evt.offsetMs !== undefined && evt.offsetMs !== null) ? evt.offsetMs : (evt.relativeMs || 0);
                                                     const leftPct = nightDurationMs > 0
@@ -3189,7 +3084,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     );
                                                 })}
 
-                                                {/* Cabezal de reproducciÃ³n (Playhead vertical) */}
+                                                {/* Cabezal de reproducción (Playhead vertical) */}
                                                 <View style={{
                                                     position: 'absolute',
                                                     left: `${Math.min(98.5, Math.max(0.5, progress * 100))}%`,
@@ -3203,7 +3098,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 }} />
                                             </View>
 
-                                            {/* FIX v2.9.8: Marcadores de Inicio Real y Fin Real â€” usar endTimestamp cuando existe */}
+                                            {/* FIX v2.9.8: Marcadores de Inicio Real y Fin Real — usar endTimestamp cuando existe */}
                                             {(() => {
                                                 const realStartMs = currentNight.startTimestamp || currentNight.modTime || 0;
                                                 const realEndMs = currentNight.endTimestamp
@@ -3212,10 +3107,10 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 return (
                                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 3, marginBottom: 4 }}>
                                                         <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
-                                                            â° Inicio: {realStartMs ? new Date(realStartMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
+                                                            ⏰ Inicio: {realStartMs ? new Date(realStartMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
                                                         </Text>
                                                         <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
-                                                            â° Fin: {realEndMs ? new Date(realEndMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
+                                                            ⏰ Fin: {realEndMs ? new Date(realEndMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
                                                         </Text>
                                                     </View>
                                                 );
@@ -3237,7 +3132,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                             </View>
                                         </View>
 
-                                        {/* â”€â”€â”€ TARJETA INTERACTIVA DE METADATOS DEL EVENTO SELECCIONADO â”€â”€â”€ */}
+                                        {/* ─── TARJETA INTERACTIVA DE METADATOS DEL EVENTO SELECCIONADO ─── */}
                                         {selectedEvent && (
                                             <View style={{
                                                 marginVertical: 10,
@@ -3259,18 +3154,18 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                         onPress={() => setSelectedEvent(null)}
                                                         style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)' }}
                                                     >
-                                                        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>âœ• Cerrar</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>✕ Cerrar</Text>
                                                     </TouchableOpacity>
                                                 </View>
 
-                                                {/* FIX v2.9.8: Grid de Metadatos del evento â€” HORA REGISTRADA muestra hora real del reloj */}
+                                                {/* FIX v2.9.8: Grid de Metadatos del evento — HORA REGISTRADA muestra hora real del reloj */}
                                                 {(() => {
                                                     // Calcular hora real del evento: startTimestamp + offsetMs del evento
                                                     const evOffsetMs = (selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null)
                                                         ? selectedEvent.offsetMs
                                                         : (selectedEvent.relativeMs || 0);
                                                     // Si el evento tiene timestamp ISO real, usarlo directamente
-                                                    // Si no, calcular desde el inicio de la sesiÃ³n + offset
+                                                    // Si no, calcular desde el inicio de la sesión + offset
                                                     let realEvTime = null;
                                                     if (selectedEvent.timestamp) {
                                                         const d = new Date(selectedEvent.timestamp);
@@ -3289,28 +3184,28 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     return (
                                                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
-                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>â° HORA REGISTRADA</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>⏰ HORA REGISTRADA</Text>
                                                         <Text style={{ color: '#f8fafc', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
                                                             {realEvTime || '--:--'} hrs
                                                         </Text>
                                                     </View>
 
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
-                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>â±ï¸ MOMENTO NOCTURNO</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>⏱️ MOMENTO NOCTURNO</Text>
                                                         <Text style={{ color: '#38bdf8', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
                                                             +{fmtMs((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0))}
                                                         </Text>
                                                     </View>
 
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
-                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>ðŸ”Š INTENSIDAD MÃXIMA</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🔊 INTENSIDAD MÁXIMA</Text>
                                                         <Text style={{ color: '#fbbf24', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
                                                             {selectedEvent.intensityDb ? `${selectedEvent.intensityDb} dB` : (selectedEvent.peakDb ? `${Math.abs(selectedEvent.peakDb)} dB` : '55 dB')}
                                                         </Text>
                                                     </View>
 
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
-                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>ðŸŽ¯ CERTEZA IA</Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>🎯 CERTEZA IA</Text>
                                                         <Text style={{ color: '#34d399', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
                                                             {selectedEvent.confidence || 92}% confianza
                                                         </Text>
@@ -3319,7 +3214,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     );
                                                 })()}
 
-                                                {/* BotÃ³n de acciÃ³n sobre este evento */}
+                                                {/* Botón de acción sobre este evento */}
                                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                                                     <TouchableOpacity
                                                         onPress={() => {
@@ -3338,7 +3233,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                         }}
                                                     >
                                                         <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '800' }}>
-                                                            â–¶ Escuchar este tramo nocturno
+                                                            ▶ Escuchar este tramo nocturno
                                                         </Text>
                                                     </TouchableOpacity>
 
@@ -3354,7 +3249,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                         }}
                                                     >
                                                         <Text style={{ color: '#f1f5f9', fontSize: 12, fontWeight: '700' }}>
-                                                            âª -10s
+                                                            ⏪ -10s
                                                         </Text>
                                                     </TouchableOpacity>
                                                 </View>
@@ -3367,33 +3262,33 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 onPress={() => handleSkip(-60)}
                                                 style={{ flex: 1, paddingVertical: 10, backgroundColor: '#1e293b', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' }}
                                             >
-                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>â® -1 min</Text>
+                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>⏮ -1 min</Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 onPress={() => handleSkip(-15)}
                                                 style={{ flex: 1.2, paddingVertical: 10, backgroundColor: '#1e293b', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' }}
                                             >
-                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>âª -15 seg</Text>
+                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>⏪ -15 seg</Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 onPress={() => handleSkip(15)}
                                                 style={{ flex: 1.2, paddingVertical: 10, backgroundColor: '#1e293b', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' }}
                                             >
-                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>+15 seg â©</Text>
+                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>+15 seg ⏩</Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 onPress={() => handleSkip(60)}
                                                 style={{ flex: 1, paddingVertical: 10, backgroundColor: '#1e293b', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' }}
                                             >
-                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>+1 min â­</Text>
+                                                <Text style={{ color: '#f1f5f9', fontSize: 13, fontWeight: '700' }}>+1 min ⏭</Text>
                                             </TouchableOpacity>
                                         </View>
 
-                                        {/* LISTA COMPLETA DE EVENTOS DE ESTA NOCHE (INTEGRADA A LA LÃNEA DE TIEMPO) */}
+                                        {/* LISTA COMPLETA DE EVENTOS DE ESTA NOCHE (INTEGRADA A LA LÍNEA DE TIEMPO) */}
                                         {currentNight.soundEvents && currentNight.soundEvents.length > 0 && (
                                             <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
                                                 <Text style={{ color: '#cbd5e1', fontSize: 14, fontWeight: '800', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                                    ðŸ”” Eventos AcÃºsticos de la Noche ({currentNight.soundEvents.length}):
+                                                    🔔 Eventos Acústicos de la Noche ({currentNight.soundEvents.length}):
                                                 </Text>
 
                                                 <View style={{ gap: 7 }}>
@@ -3436,7 +3331,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                                         </Text>
                                                                     </View>
                                                                     <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 3 }}>
-                                                                        â° {timeStr} Â· +{fmtMs(evOffset)} transcurridos Â· {evt.intensityDb ? `${evt.intensityDb} dB` : '55 dB'}
+                                                                        ⏰ {timeStr} · +{fmtMs(evOffset)} transcurridos · {evt.intensityDb ? `${evt.intensityDb} dB` : '55 dB'}
                                                                     </Text>
                                                                 </View>
 
@@ -3452,7 +3347,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                                     gap: 5
                                                                 }}>
                                                                     <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '800' }}>
-                                                                        {isEvSelected ? 'ðŸ“ En reproducciÃ³n' : 'â–¶ Ir al punto'}
+                                                                        {isEvSelected ? '📍 En reproducción' : '▶ Ir al punto'}
                                                                     </Text>
                                                                 </View>
                                                             </TouchableOpacity>
@@ -3463,7 +3358,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                         )}
 
 
-                                        {/* BotÃ³n de EliminaciÃ³n Seguro y Discreto */}
+                                        {/* Botón de Eliminación Seguro y Discreto */}
                                         <View style={{ marginTop: 20, alignItems: 'center' }}>
                                             <TouchableOpacity
                                                 onPress={() => handleDelete(currentNight)}
@@ -3480,20 +3375,20 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                 }}
                                             >
                                                 <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '700' }}>
-                                                    ðŸ—‘ï¸ Eliminar GrabaciÃ³n de esta Noche
+                                                    🗑️ Eliminar Grabación de esta Noche
                                                 </Text>
                                             </TouchableOpacity>
                                         </View>
                                     </View>
                                 )}
 
-                                {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-                                {/* 3. OTRAS GRABACIONES (PRUEBAS DE MICRÃ“FONO, AUDIO SUELTO)             */}
-                                {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                                {/* ══════════════════════════════════════════════════════════════════════ */}
+                                {/* 3. OTRAS GRABACIONES (PRUEBAS DE MICRÓFONO, AUDIO SUELTO)             */}
+                                {/* ══════════════════════════════════════════════════════════════════════ */}
                                 {otherRecordings.length > 0 && (
                                     <View style={{ marginTop: 10 }}>
                                         <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                            ðŸŽ™ï¸ Grabaciones de Prueba de Voz ({otherRecordings.length})
+                                            🎙️ Grabaciones de Prueba de Voz ({otherRecordings.length})
                                         </Text>
 
                                         {otherRecordings.map((rec) => {
@@ -3517,7 +3412,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                     <View style={{ flex: 1 }}>
                                                         <Text style={{ color: '#f8fafc', fontSize: 13, fontWeight: '700' }}>{rec.label}</Text>
                                                         <Text style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
-                                                            {rec.dateStr} Â· {rec.sizeKb} KB
+                                                            {rec.dateStr} · {rec.sizeKb} KB
                                                         </Text>
                                                     </View>
 
@@ -3532,7 +3427,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                         onPress={() => handlePlayPause(rec)}
                                                     >
                                                         <Text style={{ color: '#ffffff', fontWeight: '800', fontSize: 12 }}>
-                                                            {isPlayingTest ? 'â¸' : 'â–¶'}
+                                                            {isPlayingTest ? '⏸' : '▶'}
                                                         </Text>
                                                     </TouchableOpacity>
 
@@ -3545,7 +3440,7 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                                                         }}
                                                         onPress={() => handleDelete(rec)}
                                                     >
-                                                        <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 12 }}>ðŸ—‘</Text>
+                                                        <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 12 }}>🗑</Text>
                                                     </TouchableOpacity>
                                                 </View>
                                             );
@@ -3574,15 +3469,15 @@ El sistema web ya puede procesar tus estadÃ­sticas.`
                 onStartPairMonitoring={handleStartPairMonitoring}
             />
 
-            {/* Pie con botÃ³n de cerrar sesiÃ³n */}
+            {/* Pie con botón de cerrar sesión */}
             <View style={s.footer}>
-                <Button title="Cerrar sesiÃ³n" onPress={onLogout} color="#64748b" />
+                <Button title="Cerrar sesión" onPress={onLogout} color="#64748b" />
             </View>
         </ScrollView>
     );
 }
 
-// â”€â”€â”€ Estilos Principales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Estilos Principales ──────────────────────────────────────────────────────
 const s = StyleSheet.create({
     container: {
         flexGrow: 1,
@@ -4210,7 +4105,7 @@ const s = StyleSheet.create({
         marginTop: 2,
     },
 
-    // â”€â”€ Enhanced audio player â”€â”€
+    // ── Enhanced audio player ──
     playerControls: {
         marginTop: 6,
     },
@@ -4247,7 +4142,7 @@ const s = StyleSheet.create({
         fontWeight: '700',
     },
 
-    // â”€â”€â”€ Timeline Bar & Event Navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Timeline Bar & Event Navigation ──────────────────────────────────
     timelineBar: {
         height: 38,
         backgroundColor: '#172033',
@@ -4319,4 +4214,3 @@ const s = StyleSheet.create({
         paddingTop: 16,
     },
 });
-
