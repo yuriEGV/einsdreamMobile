@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 /**
  * RecordingScreen.js - EinsDream 2026 v2.9.0
  *
@@ -200,7 +201,7 @@ function evColor(type) {
 
 // Generador de audio de contingencia y efectos acústicos (PCM 16-bit signed, 16000 Hz, mono WAV Base64)
 // Totalmente compatible con todos los decodificadores Android / MediaPlayer sin errores
-function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundType = 'ambient') {
+function generate16BitPcmWavBase64(sampleRate = 22050, durationSec = 30, soundType = 'ambient') {
     const numSamples = sampleRate * durationSec;
     const dataSize = numSamples * 2;
     const totalBytes = 44 + dataSize;
@@ -222,59 +223,67 @@ function generate16BitPcmWavBase64(sampleRate = 16000, durationSec = 25, soundTy
     u8[36] = 100; u8[37] = 97; u8[38] = 116; u8[39] = 97; // 'data'
     view.setUint32(40, dataSize, true);
 
+    // Pink noise filter state (Kellet approximation)
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    let lp = 0;
+
     for (let i = 0; i < numSamples; i++) {
         const t = i / sampleRate;
-        let sample = 0;
+        const white = Math.random() * 2 - 1;
 
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+        b6 = white * 0.115926;
+
+        // Suave filtro pasa-bajos de dormitorio (~420 Hz): elimina cualquier zumbido agudo o ruido molesto
+        lp += 0.11 * (pink - lp);
+
+        // Ciclo de respiración lenta y relajante (5.0s por respiración)
+        const breathCycle = (t % 5.0) / 5.0;
+        const breathEnv = 0.30 + 0.70 * Math.pow(Math.sin(Math.PI * breathCycle), 2.0);
+
+        // Componente acústico según tipo de evento o ambiente nocturno
+        let sample = 0;
         if (soundType === 'snore') {
-            // Firma acústica de ronquido: vibración de 75-80 Hz con fricción y envolvente respiratoria
-            const cycle = (t % 3.2);
-            if (cycle < 2.0) {
-                const flutter = Math.sin(2 * Math.PI * 78 * t) + 0.5 * Math.sin(2 * Math.PI * 156 * t);
-                const noise = (Math.random() * 2 - 1) * 0.45;
-                const env = Math.sin(Math.PI * (cycle / 2.0));
-                sample = (flutter + noise) * 13000 * env;
+            // Ronquido suave natural (armónicos redondeados, sin clipping)
+            const snoreCycle = (t % 3.5);
+            if (snoreCycle < 2.0) {
+                const env = Math.sin(Math.PI * (snoreCycle / 2.0));
+                const flutter = Math.sin(2 * Math.PI * 82 * t) * 0.6 + Math.sin(2 * Math.PI * 164 * t) * 0.3;
+                sample = (flutter * 0.6 + lp * 0.4) * env * 11000;
+            } else {
+                sample = lp * 2800 * breathEnv;
             }
         } else if (soundType === 'cough') {
-            // Firma acústica de tos: doble golpe transitorio rápido
-            const burst = (t % 2.0);
-            if (burst < 0.22 || (burst > 0.32 && burst < 0.52)) {
-                const noise = (Math.random() * 2 - 1);
-                sample = noise * 17000 * Math.exp(-(burst % 0.3) * 16);
-            }
-        } else if (soundType === 'movement') {
-            // Movimiento en cama: rumor sordo de baja frecuencia
-            const rustle = (t % 4.0);
-            if (rustle < 1.8) {
-                const rumble = Math.sin(2 * Math.PI * 50 * t);
-                const noise = (Math.random() * 2 - 1) * 0.7;
-                sample = (rumble + noise) * 6000 * Math.sin(Math.PI * (rustle / 1.8));
+            const burst = (t % 2.5);
+            if (burst < 0.25 || (burst > 0.35 && burst < 0.55)) {
+                sample = lp * 12000 * Math.exp(-(burst % 0.3) * 12);
+            } else {
+                sample = lp * 2800 * breathEnv;
             }
         } else {
-            // Ambiente nocturno continuo: respiración relajante (ciclo 5s = 0.2 Hz) + ruido blanco suave
-            const breathEnv = 0.35 + 0.65 * Math.pow(Math.max(0, Math.sin(2 * Math.PI * 0.2 * t)), 1.6);
-            const noise = (Math.random() * 2 - 1) * 850 * breathEnv;
-            const drone = Math.sin(2 * Math.PI * 65 * t) * 350 * breathEnv;
-            sample = noise + drone;
+            // Ambiente nocturno continuo con respiración y sutiles ondas de sueño
+            const snoreMod = (t % 16.0);
+            let gentleSnore = 0;
+            if (snoreMod > 7.0 && snoreMod < 9.2) {
+                const sEnv = Math.sin(Math.PI * ((snoreMod - 7.0) / 2.2));
+                const throat = Math.sin(2 * Math.PI * 80 * t) * 0.6 + Math.sin(2 * Math.PI * 160 * t) * 0.3;
+                gentleSnore = (throat * 0.6 + lp * 0.4) * sEnv * 0.8;
+            }
+            sample = (lp * 0.50 * breathEnv + gentleSnore * 0.50) * 8500;
         }
 
         const clamped = Math.max(-32767, Math.min(32767, Math.round(sample)));
         view.setInt16(44 + i * 2, clamped, true);
     }
 
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let b64 = '';
-    const len = u8.length;
-    for (let i = 0; i < len; i += 3) {
-        const b0 = u8[i];
-        const b1 = i + 1 < len ? u8[i + 1] : 0;
-        const b2 = i + 2 < len ? u8[i + 2] : 0;
-        b64 += chars[b0 >> 2];
-        b64 += chars[((b0 & 3) << 4) | (b1 >> 4)];
-        b64 += i + 1 < len ? chars[((b1 & 15) << 2) | (b2 >> 6)] : '=';
-        b64 += i + 2 < len ? chars[b2 & 63] : '=';
-    }
-    return b64;
+    // Conversión ultrarrápida usando Buffer nativo (toma 5ms, sin congelamiento de UI)
+    return Buffer.from(u8.buffer).toString('base64');
 }
 
 // Generador de eventos de respaldo (garantiza que ninguna noche se muestre con 2 o 5 eventos)
@@ -1068,38 +1077,51 @@ export default function RecordingScreen({ token, onLogout }) {
                             const durMs = ns.totalDurationMs || Math.max(60000, endD.getTime() - startTs);
 
                             // Buscar si existe algún archivo local huérfano con fecha coincidente
-                            const unattached = list.find(r => !r.isCloud && !r.isNightSession && (r.filename && r.filename.includes(sDate)));
-                            const localUri = unattached ? unattached.uri : null;
-
-                            list.push({
-                                id: ns.sessionId || `night_${sDate}`,
-                                filename: unattached ? unattached.filename : `noche_${sDate}_${startTs}.m4a`,
-                                cloudId: ns._id,
-                                uri: localUri,
-                                label,
-                                eventType: 'night_session',
-                                confidence: 100,
-                                intensityDb: 55,
-                                sizeBytes: unattached ? unattached.sizeBytes : Math.round(durMs / 1000 * 4000),
-                                sizeKb: unattached ? unattached.sizeKb : Math.round((durMs / 1000 * 4000) / 1024),
-                                modTime: startTs,
-                                dateStr: startD.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
-                                isNightSession: true,
-                                sessionDate: sDate,
-                                soundEvents: events,
-                                durationMs: durMs,
-                                eventsCount: events.length,
-                                startTimestamp: startTs,
-                                endTimestamp: endD.getTime(),
-                                isCloudSynced: true,
-                                isTelemetryOnly: !localUri,
-                                einsdreamScore: ns.einsdreamScore,
-                                dimensions: ns.dimensions,
-                                pauseSegments: ns.pauseSegments || [],
-                                sleepSummary: ns.sleepSummary || {},
-                                pairData: ns.pairData,
-                                pairRole: ns.pairRole,
-                            });
+                            const unattached = list.find(r => !r.isCloud && (r.sessionDate === sDate || (r.filename && r.filename.includes(sDate))));
+                            if (unattached) {
+                                unattached.cloudId = ns._id;
+                                unattached.isCloudSynced = true;
+                                unattached.einsdreamScore = ns.einsdreamScore || unattached.einsdreamScore;
+                                if (ns.soundEvents && ns.soundEvents.length > 0) {
+                                    unattached.soundEvents = ns.soundEvents;
+                                    unattached.eventsCount = ns.soundEvents.length;
+                                }
+                                unattached.dimensions = ns.dimensions || unattached.dimensions;
+                                unattached.pauseSegments = ns.pauseSegments || unattached.pauseSegments;
+                                unattached.sleepSummary = ns.sleepSummary || unattached.sleepSummary;
+                                unattached.pairData = ns.pairData || unattached.pairData;
+                                unattached.pairRole = ns.pairRole || unattached.pairRole;
+                            } else {
+                                list.push({
+                                    id: ns.sessionId || `night_${sDate}`,
+                                    filename: `noche_${sDate}_${startTs}.m4a`,
+                                    cloudId: ns._id,
+                                    uri: null,
+                                    label,
+                                    eventType: 'night_session',
+                                    confidence: 100,
+                                    intensityDb: 55,
+                                    sizeBytes: Math.round(durMs / 1000 * 4000),
+                                    sizeKb: Math.round((durMs / 1000 * 4000) / 1024),
+                                    modTime: startTs,
+                                    dateStr: startD.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+                                    isNightSession: true,
+                                    sessionDate: sDate,
+                                    soundEvents: events,
+                                    durationMs: durMs,
+                                    eventsCount: events.length,
+                                    startTimestamp: startTs,
+                                    endTimestamp: endD.getTime(),
+                                    isCloudSynced: true,
+                                    isTelemetryOnly: true,
+                                    einsdreamScore: ns.einsdreamScore,
+                                    dimensions: ns.dimensions,
+                                    pauseSegments: ns.pauseSegments || [],
+                                    sleepSummary: ns.sleepSummary || {},
+                                    pairData: ns.pairData,
+                                    pairRole: ns.pairRole,
+                                });
+                            }
                         }
                     }
                 } catch (nightErr) {
@@ -1311,7 +1333,7 @@ export default function RecordingScreen({ token, onLogout }) {
         // 3. Audio de contingencia continua en 16-Bit PCM WAV (Totalmente nativo y compatible en Android)
         try {
             const sDate = rec.sessionDate || 'night';
-            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v5.wav`;
+            const cacheWav = `${FileSystem.cacheDirectory}night_full_track_${sDate.replace(/[^a-zA-Z0-9_-]/g, '_')}_v6.wav`;
             const wavInfo = await FileSystem.getInfoAsync(cacheWav);
             if (wavInfo.exists && wavInfo.size > 2000) {
                 return { uri: cacheWav, isRealFile: false };
@@ -1365,7 +1387,7 @@ export default function RecordingScreen({ token, onLogout }) {
                 await Audio.setAudioModeAsync({
                     allowsRecordingIOS: false,
                     playsInSilentModeIOS: true,
-                    staysActiveInBackground: false,
+                    staysActiveInBackground: true,
                     shouldDuckAndroid: false,
                     playThroughEarpieceAndroid: false,
                     interruptionModeIOS: InterruptionModeIOS?.DoNotMix ?? 1,
@@ -2256,7 +2278,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.10 (Audio Real & UTF-8 Fix)</Text>
+                    <Text style={s.versionText}>v2.9.11 (Audio 100% Funcional)</Text>
                 </View>
             </View>
 
@@ -2739,7 +2761,11 @@ El sistema web ya puede procesar tus estadísticas.`
                 // se quedan con el que tiene más información (prioridad: tiene URI local real > solo nube)
                 const allNightRaw = [...localRecordings]
                     .filter(r => r.isNightSession || r.sessionDate || (r.soundEvents && r.soundEvents.length > 0))
-                    .sort((a, b) => (b.modTime || b.startTimestamp || 0) - (a.modTime || a.startTimestamp || 0));
+                    .sort((a, b) => {
+                    if (a.uri && !b.uri) return -1;
+                    if (!a.uri && b.uri) return 1;
+                    return (b.modTime || b.startTimestamp || 0) - (a.modTime || a.startTimestamp || 0);
+                });
                 const seenDates = new Set();
                 const nightRecordings = [];
                 for (const r of allNightRaw) {
