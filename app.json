@@ -1,8 +1,8 @@
-{
+﻿{
   "expo": {
     "name": "Einsdream",
     "slug": "mobile",
-    "version": "2.9.7",
+    "version": "2.9.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "package": "cl.einsdream.mobile",
-      "versionCode": 21,
+      "versionCode": 22,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },

@@ -636,8 +636,15 @@ export default function RecordingScreen({ token, onLogout }) {
             const dir = getBaseDir();
             const filePath = dir + SESSIONS_CACHE_FILENAME;
             const current = await loadCachedSessions();
-            const sDate = session.sessionDate || (session.startTime ? new Date(session.startTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
-            const filtered = current.filter(s => (s.sessionDate || (s.startTime ? new Date(s.startTime).toISOString().slice(0, 10) : '')) !== sDate);
+            // FIX v2.9.8: Usar fecha LOCAL (getNightDate) — no UTC — para la clave de deduplicación
+            // Esto evita que sesiones de madrugada (ej. 01:00) se guarden con fecha del día siguiente
+            const sDate = session.sessionDate
+                || (session.startTime ? getNightDate(new Date(session.startTime).getTime()) : getLocalDateStr());
+            const filtered = current.filter(s => {
+                const sd = s.sessionDate
+                    || (s.startTime ? getNightDate(new Date(s.startTime).getTime()) : '');
+                return sd !== sDate;
+            });
             const updated = [session, ...filtered].slice(0, 30);
             await FileSystem.writeAsStringAsync(filePath, JSON.stringify(updated));
         } catch (_) {}
@@ -749,7 +756,8 @@ export default function RecordingScreen({ token, onLogout }) {
                                 const destUri = dir + destName;
                                 await FileSystem.copyAsync({ from: cUri, to: destUri });
 
-                                const sDate = new Date(rawMtime).toISOString().slice(0, 10);
+                                // FIX v2.9.8: Usar getNightDate (hora local + regla madrugada) — no UTC slice
+                                const sDate = getNightDate(rawMtime);
                                 metaIndex[destName] = {
                                     filename: destName,
                                     label: '🌙 Noche Recuperada (Caché)',
@@ -758,6 +766,7 @@ export default function RecordingScreen({ token, onLogout }) {
                                     sizeBytes: cStat.size,
                                     timestamp: rawMtime,
                                     sessionDate: sDate,
+                                    startTimestamp: rawMtime - Math.round((cStat.size / 4000) * 1000),
                                     durationMs: Math.round((cStat.size / 4000) * 1000),
                                 };
                                 await saveMetadataIndex(metaIndex);
@@ -1770,10 +1779,19 @@ export default function RecordingScreen({ token, onLogout }) {
             if (correlated.sleepSummary) {
                 correlated.sleepSummary.durationMinutes = elapsedMinutes;
             }
-            correlated.soundEvents   = capturedEvents;
-            correlated.eventsCount   = capturedEvents.length;
-            correlated.sessionDate   = sessionDateStr;
-            correlated.pauseSegments = capturedPauseSegments;
+            correlated.soundEvents      = capturedEvents;
+            correlated.eventsCount      = capturedEvents.length;
+            correlated.sessionDate      = sessionDateStr;
+            correlated.pauseSegments    = capturedPauseSegments;
+
+            // FIX v2.9.8: Anclar SIEMPRE las horas reales de la pulsación de los botones.
+            // Esto garantiza que las estadísticas de sueño reflejen el tiempo REAL monitoreado
+            // y no los valores derivados o interpolados del motor de análisis.
+            correlated.startTime        = start.toISOString();
+            correlated.endTime          = end.toISOString();
+            correlated.startTimestamp   = startTimeMs;
+            correlated.endTimestamp     = endTimeMs;
+            correlated.totalDurationMs  = effectiveDurationMs;
 
             if (pairSessionResult) {
                 correlated.pairData = pairSessionResult;
@@ -2234,7 +2252,7 @@ El sistema web ya puede procesar tus estadísticas.`
             <View style={s.topHeader}>
                 <Text style={s.mainAppTitle}>EinsDream</Text>
                 <View style={s.versionBadge}>
-                    <Text style={s.versionText}>v2.9.7 (Audio Engine & Sleep Target Accuracy)</Text>
+                    <Text style={s.versionText}>v2.9.8 (Date Dedup & Real Sleep Times Fix)</Text>
                 </View>
             </View>
 
@@ -2713,9 +2731,20 @@ El sistema web ya puede procesar tus estadísticas.`
             {/* PESTAÑA 4: 🎧 GRABACIONES & AUDIOS LOCALES                        */}
             {/* ═══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'recordings' && (() => {
-                const nightRecordings = [...localRecordings]
+                // FIX v2.9.8: Deduplicar por sessionDate — si hay archivo local + nube con la misma fecha
+                // se quedan con el que tiene más información (prioridad: tiene URI local real > solo nube)
+                const allNightRaw = [...localRecordings]
                     .filter(r => r.isNightSession || r.sessionDate || (r.soundEvents && r.soundEvents.length > 0))
                     .sort((a, b) => (b.modTime || b.startTimestamp || 0) - (a.modTime || a.startTimestamp || 0));
+                const seenDates = new Set();
+                const nightRecordings = [];
+                for (const r of allNightRaw) {
+                    const key = r.sessionDate || r.id;
+                    if (!key || !seenDates.has(key)) {
+                        seenDates.add(key);
+                        nightRecordings.push(r);
+                    }
+                }
 
                 const otherRecordings = [...localRecordings]
                     .filter(r => !r.isNightSession && !r.sessionDate && (!r.soundEvents || r.soundEvents.length === 0))
@@ -3065,15 +3094,23 @@ El sistema web ya puede procesar tus estadísticas.`
                                                 }} />
                                             </View>
 
-                                            {/* Marcadores de Inicio Real y Fin Real del descanso */}
-                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 3, marginBottom: 4 }}>
-                                                <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
-                                                    ⏰ Inicio: {new Date(currentNight.startTimestamp || currentNight.modTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs
-                                                </Text>
-                                                <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
-                                                    ⏰ Fin: {new Date((currentNight.startTimestamp || currentNight.modTime) + nightDurationMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} hrs
-                                                </Text>
-                                            </View>
+                                            {/* FIX v2.9.8: Marcadores de Inicio Real y Fin Real — usar endTimestamp cuando existe */}
+                                            {(() => {
+                                                const realStartMs = currentNight.startTimestamp || currentNight.modTime || 0;
+                                                const realEndMs = currentNight.endTimestamp
+                                                    || (currentNight.startTimestamp && nightDurationMs ? currentNight.startTimestamp + nightDurationMs : 0)
+                                                    || (currentNight.modTime ? currentNight.modTime + nightDurationMs : 0);
+                                                return (
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 3, marginBottom: 4 }}>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
+                                                            ⏰ Inicio: {realStartMs ? new Date(realStartMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
+                                                        </Text>
+                                                        <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
+                                                            ⏰ Fin: {realEndMs ? new Date(realEndMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '--:--'} hrs
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            })()}
 
                                             {/* Leyenda resumida de colores */}
                                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6, justifyContent: 'center' }}>
@@ -3117,12 +3154,35 @@ El sistema web ya puede procesar tus estadísticas.`
                                                     </TouchableOpacity>
                                                 </View>
 
-                                                {/* Grid de Metadatos del evento */}
+                                                {/* FIX v2.9.8: Grid de Metadatos del evento — HORA REGISTRADA muestra hora real del reloj */}
+                                                {(() => {
+                                                    // Calcular hora real del evento: startTimestamp + offsetMs del evento
+                                                    const evOffsetMs = (selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null)
+                                                        ? selectedEvent.offsetMs
+                                                        : (selectedEvent.relativeMs || 0);
+                                                    // Si el evento tiene timestamp ISO real, usarlo directamente
+                                                    // Si no, calcular desde el inicio de la sesión + offset
+                                                    let realEvTime = null;
+                                                    if (selectedEvent.timestamp) {
+                                                        const d = new Date(selectedEvent.timestamp);
+                                                        if (!isNaN(d.getTime()) && d.getFullYear() > 2020) {
+                                                            realEvTime = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                                                        }
+                                                    }
+                                                    if (!realEvTime) {
+                                                        const sessionStartMs = currentNight.startTimestamp || currentNight.modTime || 0;
+                                                        if (sessionStartMs > 0) {
+                                                            realEvTime = new Date(sessionStartMs + evOffsetMs).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                                                        } else if (selectedEvent.timeLabel && !selectedEvent.timeLabel.includes(':') === false && !selectedEvent.timeLabel.startsWith('+')) {
+                                                            realEvTime = selectedEvent.timeLabel;
+                                                        }
+                                                    }
+                                                    return (
                                                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
                                                     <View style={{ flex: 1, minWidth: 120, backgroundColor: '#0f172a', padding: 8, borderRadius: 8 }}>
                                                         <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: '700' }}>⏰ HORA REGISTRADA</Text>
                                                         <Text style={{ color: '#f8fafc', fontSize: 14, fontWeight: '800', marginTop: 2 }}>
-                                                            {selectedEvent.timeLabel || fmtMs((selectedEvent.offsetMs !== undefined && selectedEvent.offsetMs !== null) ? selectedEvent.offsetMs : (selectedEvent.relativeMs || 0))} hrs
+                                                            {realEvTime || '--:--'} hrs
                                                         </Text>
                                                     </View>
 
@@ -3147,6 +3207,8 @@ El sistema web ya puede procesar tus estadísticas.`
                                                         </Text>
                                                     </View>
                                                 </View>
+                                                    );
+                                                })()}
 
                                                 {/* Botón de acción sobre este evento */}
                                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
